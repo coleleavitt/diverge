@@ -1,0 +1,6 @@
+/target
+/research/
+/.codegraph/
+/.jfc/
+!/.claude/
+!/.claude/**
