@@ -1,5 +1,6 @@
 pub mod atom;
 pub mod cli;
+pub mod dep;
 pub mod resolver;
 pub mod version;
 

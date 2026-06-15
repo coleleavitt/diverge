@@ -7,7 +7,7 @@ This inventory records every upstream Python test file currently present so dive
 ## Summary
 
 - Upstream test files inventoried: 239
-- Representative Rust ports currently implemented: 4 files / 16 Rust tests
+- Representative Rust ports currently implemented: 8 test files (14 ported upstream test files) / 30 Rust tests
 - Current Rust parity test entrypoint: `tests/portage.rs`
 - Coverage command: `cargo llvm-cov --workspace --all-targets --summary-only`
 
@@ -64,25 +64,25 @@ This inventory records every upstream Python test file currently present so dive
 | todo | `research/portage/lib/portage/tests/dbapi/test_portdb_cache.py` | TBD |
 | ported-representative | `research/portage/lib/portage/tests/dep/test_atom.py` | `tests/portage/atom_parity.rs` |
 | todo | `research/portage/lib/portage/tests/dep/test_best_match_to_list.py` | TBD |
-| todo | `research/portage/lib/portage/tests/dep/test_check_required_use.py` | TBD |
-| todo | `research/portage/lib/portage/tests/dep/test_dep_getcpv.py` | TBD |
-| todo | `research/portage/lib/portage/tests/dep/test_dep_getrepo.py` | TBD |
-| todo | `research/portage/lib/portage/tests/dep/test_dep_getslot.py` | TBD |
-| todo | `research/portage/lib/portage/tests/dep/test_dep_getusedeps.py` | TBD |
+| ported-representative | `research/portage/lib/portage/tests/dep/test_check_required_use.py` | `tests/portage/dep_reduce_parity.rs` |
+| ported-representative | `research/portage/lib/portage/tests/dep/test_dep_getcpv.py` | `tests/portage/dep_accessors_parity.rs` |
+| ported-representative | `research/portage/lib/portage/tests/dep/test_dep_getrepo.py` | `tests/portage/dep_accessors_parity.rs` |
+| ported-representative | `research/portage/lib/portage/tests/dep/test_dep_getslot.py` | `tests/portage/dep_accessors_parity.rs` |
+| ported-representative | `research/portage/lib/portage/tests/dep/test_dep_getusedeps.py` | `tests/portage/dep_accessors_parity.rs` |
 | todo | `research/portage/lib/portage/tests/dep/test_dnf_convert.py` | TBD |
 | todo | `research/portage/lib/portage/tests/dep/test_extended_atom_dict.py` | TBD |
 | todo | `research/portage/lib/portage/tests/dep/test_extract_affecting_use.py` | TBD |
-| todo | `research/portage/lib/portage/tests/dep/test_get_operator.py` | TBD |
+| ported-representative | `research/portage/lib/portage/tests/dep/test_get_operator.py` | `tests/portage/dep_accessors_parity.rs` |
 | todo | `research/portage/lib/portage/tests/dep/test_get_required_use_flags.py` | TBD |
-| todo | `research/portage/lib/portage/tests/dep/test_isjustname.py` | TBD |
+| ported-representative | `research/portage/lib/portage/tests/dep/test_isjustname.py` | `tests/portage/dep_accessors_parity.rs` |
 | todo | `research/portage/lib/portage/tests/dep/test_isvalidatom.py` | TBD |
 | todo | `research/portage/lib/portage/tests/dep/test_libc.py` | TBD |
 | todo | `research/portage/lib/portage/tests/dep/test_match_from_list.py` | TBD |
 | todo | `research/portage/lib/portage/tests/dep/test_overlap_dnf.py` | TBD |
-| todo | `research/portage/lib/portage/tests/dep/test_paren_reduce.py` | TBD |
+| ported-representative | `research/portage/lib/portage/tests/dep/test_paren_reduce.py` | `tests/portage/dep_reduce_parity.rs` |
 | todo | `research/portage/lib/portage/tests/dep/test_soname_atom_pickle.py` | TBD |
 | todo | `research/portage/lib/portage/tests/dep/test_standalone.py` | TBD |
-| todo | `research/portage/lib/portage/tests/dep/test_use_reduce.py` | TBD |
+| ported-representative | `research/portage/lib/portage/tests/dep/test_use_reduce.py` | `tests/portage/dep_reduce_parity.rs` |
 | todo | `research/portage/lib/portage/tests/ebuild/test_array_fromfile_eof.py` | TBD |
 | todo | `research/portage/lib/portage/tests/ebuild/test_config.py` | TBD |
 | todo | `research/portage/lib/portage/tests/ebuild/test_doebuild_fd_pipes.py` | TBD |
@@ -288,6 +288,6 @@ This inventory records every upstream Python test file currently present so dive
 | todo | `research/portage/lib/portage/tests/util/test_varExpand.py` | TBD |
 | todo | `research/portage/lib/portage/tests/util/test_whirlpool.py` | TBD |
 | todo | `research/portage/lib/portage/tests/util/test_xattr.py` | TBD |
-| todo | `research/portage/lib/portage/tests/versions/test_cpv_sort_key.py` | TBD |
+| ported-representative | `research/portage/lib/portage/tests/versions/test_cpv_sort_key.py` | `tests/portage/version_sort_parity.rs` |
 | ported-representative | `research/portage/lib/portage/tests/versions/test_vercmp.py` | `tests/portage/version_parity.rs` |
 | todo | `research/portage/lib/portage/tests/xpak/test_decodeint.py` | TBD |

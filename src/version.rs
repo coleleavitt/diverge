@@ -181,3 +181,56 @@ fn suffix_rank(kind: &str) -> u8 {
         _ => 4,
     }
 }
+
+/// Returns true when `input` looks like a Portage version string
+/// (starts with a digit, optional `_suffix`/`-rN`). Used by `dep` helpers
+/// and cpv sorting. Wildcard atom tokens are intentionally rejected here;
+/// see `atom.rs` for the wildcard-aware variant used during atom parsing.
+pub fn is_version(input: &str) -> bool {
+    if input.is_empty() {
+        return false;
+    }
+    let without_revision = match input.rsplit_once("-r") {
+        Some((base, rev)) if !base.is_empty() && rev.chars().all(|c| c.is_ascii_digit()) => base,
+        _ => input,
+    };
+    without_revision
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_digit())
+        && without_revision
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+}
+
+/// Splits a `category/package-version` string into its `cp` and optional
+/// version, mirroring Portage's `catpkgsplit` boundary detection.
+pub fn split_cpv(cpv: &str) -> (String, Option<String>) {
+    for index in cpv.match_indices('-').map(|(index, _)| index).rev() {
+        let (cp, version) = (&cpv[..index], &cpv[index + 1..]);
+        if !cp.is_empty() && is_version(version) {
+            return (cp.to_string(), Some(version.to_string()));
+        }
+    }
+    (cpv.to_string(), None)
+}
+
+/// Orders two cpv strings by `cp` then version, matching Portage's
+/// `cpv_sort_key` ordering semantics.
+pub fn cpv_cmp(left: &str, right: &str) -> Ordering {
+    let (left_cp, left_version) = split_cpv(left);
+    let (right_cp, right_version) = split_cpv(right);
+    left_cp
+        .cmp(&right_cp)
+        .then_with(|| match (&left_version, &right_version) {
+            (Some(left), Some(right)) => vercmp(left, right),
+            (None, None) => Ordering::Equal,
+            (None, Some(_)) => Ordering::Less,
+            (Some(_), None) => Ordering::Greater,
+        })
+}
+
+/// Sorts cpv strings in place using [`cpv_cmp`].
+pub fn sort_cpvs(values: &mut [String]) {
+    values.sort_by(|left, right| cpv_cmp(left, right));
+}
