@@ -63,6 +63,12 @@ Start research from these files:
 - `research/portage/bin/ebuild.sh`, `phase-functions.sh`, `phase-helpers.sh`, `misc-functions.sh`, and `isolated-functions.sh`: shell phase helpers and ebuild execution contract.
 - `research/portage/lib/portage/tests/`: reference test ideas for resolver, emerge actions, config, and ebuild behavior.
 
+Durable project references:
+
+- `MEMORY.md`: concise project memory and current scaffold status.
+- `docs/testing-spec.md`: test-porting workflow, fixture rules, and coverage gate.
+- `docs/portage-test-inventory.md`: inventory of all upstream Portage Python tests and Rust porting status.
+
 Codegraph has been initialized for this repo and indexes both the current Rust source and supported Python/bash files in `research/portage/`. Use Codegraph first for Portage symbols and Rust symbols, then focused reads for exact surrounding context.
 
 ## Design Principles
@@ -83,12 +89,14 @@ Do not port Python object structure or shell control flow mechanically. Preserve
 - Do not edit `research/portage/` except when deliberately refreshing the reference checkout.
 - Before implementing a feature, identify the Portage reference module and record the intended Rust equivalent in tests, docs, or issue notes when useful.
 - Add tests with every user-visible behavior change.
+- When porting behavior from Portage tests, update `docs/portage-test-inventory.md` and cite the upstream test file in the Rust test or documentation.
 - Add integration tests that combine features. A feature is not done if it only works in isolation.
 - Prefer property tests for atom/version parsing, dependency expression normalization, USE condition evaluation, path normalization, and resolver invariants.
 - Keep examples and CLI help output current. They are part of the compatibility contract.
 - Run formatting and tests before handing work back:
-  - `cargo fmt --all`
+  - `cargo fmt --all --check`
   - `cargo clippy --workspace --all-targets -- -D warnings`
   - `cargo test --workspace --all-targets`
+  - `cargo llvm-cov --workspace --all-targets --summary-only`
 
 If the workspace has not been scaffolded beyond the initial binary yet, do the smallest useful scaffold first, then add tests around the first implemented slice.

@@ -30,7 +30,8 @@ Ask for or infer:
 4. Compare observable behavior: inputs, outputs, exit codes, selected packages, dependency graph, world/set changes, filesystem operations, logs, and failure modes.
 5. Check for fixture coverage and integration tests, not only unit parser tests.
 6. Check safety boundaries for filesystem writes, process execution, network access, archive extraction, permissions, and resume/rollback state.
-7. Run focused tests first, then `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo test --workspace --all-targets` when feasible.
+7. Confirm `docs/portage-test-inventory.md` reflects the current Rust porting status for any upstream tests touched.
+8. Run focused tests first, then `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace --all-targets`, and `cargo llvm-cov --workspace --all-targets --summary-only` when feasible.
 
 ## Output
 

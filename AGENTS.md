@@ -33,6 +33,7 @@ For the primary project instructions, read `CLAUDE.md` first. The goal is to rew
 - Do not edit `research/portage/` unless explicitly asked to refresh the reference checkout.
 - Before implementing behavior, identify the matching Portage reference file and the observable behavior to preserve.
 - Add tests for CLI parsing, config loading, atom/version parsing, USE/dependency semantics, resolver decisions, scheduler ordering, fetch/build/merge/unmerge behavior, binary package behavior, and error reporting as those features are implemented.
+- Maintain `docs/portage-test-inventory.md` as the durable map from upstream Portage Python tests to Rust ports.
 - Add integration tests that combine features; isolated parser examples are not enough.
 - Keep Rust APIs idiomatic, documented, and hard to misuse.
 - Prefer structured parsing, typed IDs, typed errors, explicit transaction plans, and deterministic output over stringly typed internals.
@@ -43,9 +44,10 @@ For the primary project instructions, read `CLAUDE.md` first. The goal is to rew
 When Rust source exists, run:
 
 ```sh
-cargo fmt --all
+cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --all-targets
+cargo llvm-cov --workspace --all-targets --summary-only
 ```
 
 If these commands cannot run because the workspace is not scaffolded yet, report that directly.

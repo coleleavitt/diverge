@@ -23,5 +23,6 @@ Run focused commands first, then broader commands when feasible:
 - `cargo fmt --all --check`
 - `cargo clippy --workspace --all-targets -- -D warnings`
 - `cargo test --workspace --all-targets`
+- `cargo llvm-cov --workspace --all-targets --summary-only`
 
-If a command cannot run because the workspace is not scaffolded or dependencies are missing, report that directly.
+If a command cannot run because the workspace is not scaffolded, dependencies are missing, or `cargo-llvm-cov` is unavailable, report that directly.

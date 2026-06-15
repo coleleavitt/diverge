@@ -12,4 +12,5 @@ These rules always apply.
 - Use property tests for atom/version parsing, dependency expression round trips, USE flag condition evaluation, path normalization, and resolver invariants.
 - Use golden tests for CLI help, planned operation output, resolver explanations, and failure reports.
 - Never let tests mutate `/`, `/etc/portage`, `/var/db/pkg`, real distdirs, or the user's world file. Use tempdirs and fixture roots.
-- Run `cargo test --workspace --all-targets` before finalizing implementation work. If it cannot run, record the reason.
+- Keep `docs/portage-test-inventory.md` current when porting upstream Portage tests; mark rows as ported only after the Rust test exists and passes.
+- Run `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace --all-targets`, and `cargo llvm-cov --workspace --all-targets --summary-only` before finalizing implementation work. If a command cannot run, record the reason.
