@@ -66,8 +66,8 @@ def main() -> int:
             paren_reduce,
             use_reduce,
         )
-        from portage.exception import InvalidAtom, InvalidDependString
-        from portage.util import varexpand
+        from portage.exception import InvalidAtom, InvalidDependString, ParseError
+        from portage.util import getconfig, varexpand
         from portage.versions import cpv_sort_key, vercmp
     except Exception as exc:  # pragma: no cover - only without portage
         sys.stderr.write(f"portage import failed: {exc}\n")
@@ -286,6 +286,63 @@ def main() -> int:
             _b64(mystring),
             _b64_dict(mydict),
             _b64(result),
+        )
+
+    # getconfig - tests/util/test_getconfig.py
+    # Content/result are base64-encoded; a ParseError is recorded as ERR. The
+    # expand flag and initial expand map are passed through so the Rust port
+    # is exercised on the same inputs.
+    gc_cases = [
+        ("A=1\n", True, {}),
+        ('A="hello world"\nB=2\n', True, {}),
+        ("A=1 B=$A\n", True, {}),
+        ("A=1\nA=2\n", True, {}),
+        ('CFLAGS="-O2"\nCXXFLAGS="${CFLAGS}"\n', True, {}),
+        ("export A=1\n", True, {}),
+        ('export FOO="x ${A}"\n', True, {"A": "Z"}),
+        ("# comment\nA=1\n", True, {}),
+        ("A=1 # trailing\n", True, {}),
+        ('USE="a b -c"\n', True, {}),
+        ("A=foo/bar-1.2:3\n", True, {}),
+        ('A="a \\"b\\" c"\n', True, {}),
+        ("A=-5\n", True, {}),
+        ("A=a=b\n", True, {}),
+        ("EMPTY=\"\"\n", True, {}),
+        ("A=1\n", False, {}),
+        ('A="x${B}y"\n', False, {}),
+        ("A=foo\\\nbar\n", True, {}),
+        # ParseError cases:
+        ("A=#c\n", True, {}),
+        ("1BAD=x\n", True, {}),
+        ("A=1 \\\n B=2\n", True, {}),
+        ('A="unterminated\n', True, {}),
+    ]
+    import tempfile
+    for content, expand, initial in gc_cases:
+        with tempfile.NamedTemporaryFile("w", suffix=".conf", delete=False) as fh:
+            fh.write(content)
+            name = fh.name
+        try:
+            try:
+                result = getconfig(
+                    name, expand=dict(initial) if (expand and initial) else expand
+                )
+                value = _b64_dict(result if result is not None else {})
+            except (ParseError, ValueError):
+                # Upstream raises on malformed config (ParseError) or an
+                # unterminated quote (shlex ValueError); both are observable
+                # parse failures for the differential.
+                value = ERR
+        finally:
+            import os as _os
+            _os.unlink(name)
+        emit(
+            out,
+            "getconfig",
+            _b64(content),
+            "1" if expand else "0",
+            _b64_dict(initial),
+            value,
         )
 
     return 0

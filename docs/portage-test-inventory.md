@@ -23,8 +23,8 @@ differential test:
   `use_reduce`, `check_required_use`) over input vectors transcribed from the
   upstream test files, and emits canonical TSV records of emerge's own output.
 - `tests/interop_differential.rs` runs that oracle and diffs every record
-  against diverge's Rust implementations (currently 308 records, including
-  `portage.util.varexpand`).
+  against diverge's Rust implementations (currently 330 records, including
+  `portage.util.varexpand` and `portage.util.getconfig`).
 - The Rust test **skips cleanly** when `python3` is missing, when the
   `research/portage` checkout is absent, or when the oracle exits `77`
   (portage failed to import), so it never breaks CI on machines without the

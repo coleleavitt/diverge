@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use diverge::config::varexpand;
+use diverge::config::{getconfig, varexpand};
 use diverge::dep::{
     Dep,
     UseReduceOptions,
@@ -174,8 +174,76 @@ fn check_record(fields: &[&str]) -> Result<(), String> {
         "use_reduce" => check_use_reduce(fields),
         "check_required_use" => check_cru(fields),
         "varexpand" => check_varexpand(fields),
+        "getconfig" => check_getconfig(fields),
         other => Err(format!("unknown record kind '{other}'")),
     }
+}
+
+fn check_getconfig(fields: &[&str]) -> Result<(), String> {
+    let content = b64_decode_str(fields[1]);
+    let expand = fields[2] == "1";
+    let initial = decode_dict(fields[3]);
+    let expected = fields[4];
+
+    let got = match getconfig(&content, expand, &initial) {
+        Ok(map) => encode_dict(&map),
+        Err(_) => ERR.to_string(),
+    };
+    if got == expected {
+        Ok(())
+    } else {
+        Err(format!(
+            "  getconfig({content:?}, expand={expand}): upstream={} rust={}",
+            show_dict(expected),
+            show_dict(&got)
+        ))
+    }
+}
+
+/// Re-encodes a parsed map into the oracle's base64 `k=v\x1f...` form so it
+/// compares byte-for-byte with the upstream-produced field.
+fn encode_dict(map: &HashMap<String, String>) -> String {
+    let mut entries: Vec<(&String, &String)> = map.iter().collect();
+    entries.sort();
+    let joined = entries
+        .iter()
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect::<Vec<_>>()
+        .join("\u{1f}");
+    b64_encode(joined.as_bytes())
+}
+
+fn show_dict(field: &str) -> String {
+    if field == ERR {
+        "<ParseError>".to_string()
+    } else {
+        format!("{:?}", b64_decode_str(field))
+    }
+}
+
+/// Minimal standard-base64 encoder (no external crate), matching the oracle.
+fn b64_encode(input: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for chunk in input.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = *chunk.get(1).unwrap_or(&0) as u32;
+        let b2 = *chunk.get(2).unwrap_or(&0) as u32;
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(TABLE[((n >> 18) & 63) as usize] as char);
+        out.push(TABLE[((n >> 12) & 63) as usize] as char);
+        out.push(if chunk.len() > 1 {
+            TABLE[((n >> 6) & 63) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            TABLE[(n & 63) as usize] as char
+        } else {
+            '='
+        });
+    }
+    out
 }
 
 fn check_varexpand(fields: &[&str]) -> Result<(), String> {
