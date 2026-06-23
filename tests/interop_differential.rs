@@ -16,9 +16,11 @@
 //! Rust port fails the test with a per-record summary.
 
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use diverge::config::varexpand;
 use diverge::dep::{
     Dep,
     UseReduceOptions,
@@ -171,8 +173,73 @@ fn check_record(fields: &[&str]) -> Result<(), String> {
         }
         "use_reduce" => check_use_reduce(fields),
         "check_required_use" => check_cru(fields),
+        "varexpand" => check_varexpand(fields),
         other => Err(format!("unknown record kind '{other}'")),
     }
+}
+
+fn check_varexpand(fields: &[&str]) -> Result<(), String> {
+    let input = b64_decode_str(fields[1]);
+    let dict = decode_dict(fields[2]);
+    let expected = b64_decode_str(fields[3]);
+    let got = varexpand(&input, &dict);
+    if got == expected {
+        Ok(())
+    } else {
+        Err(format!(
+            "  varexpand({input:?}, {dict:?}): upstream={expected:?} rust={got:?}"
+        ))
+    }
+}
+
+/// Decodes the base64 `k=v\x1fk=v` dict serialization from the oracle.
+fn decode_dict(field: &str) -> HashMap<String, String> {
+    let decoded = b64_decode_str(field);
+    let mut map = HashMap::new();
+    if decoded.is_empty() {
+        return map;
+    }
+    for entry in decoded.split('\u{1f}') {
+        if let Some((k, v)) = entry.split_once('=') {
+            map.insert(k.to_string(), v.to_string());
+        }
+    }
+    map
+}
+
+fn b64_decode_str(input: &str) -> String {
+    String::from_utf8(b64_decode(input)).expect("oracle base64 decodes to UTF-8")
+}
+
+/// Minimal standard-base64 decoder (no external crate). The oracle only emits
+/// canonical base64 with `=` padding, so this need not handle URL-safe input.
+fn b64_decode(input: &str) -> Vec<u8> {
+    fn val(c: u8) -> Option<u32> {
+        match c {
+            b'A'..=b'Z' => Some((c - b'A') as u32),
+            b'a'..=b'z' => Some((c - b'a' + 26) as u32),
+            b'0'..=b'9' => Some((c - b'0' + 52) as u32),
+            b'+' => Some(62),
+            b'/' => Some(63),
+            _ => None,
+        }
+    }
+    let mut out = Vec::new();
+    let mut buf = 0u32;
+    let mut bits = 0u32;
+    for &c in input.as_bytes() {
+        if c == b'=' {
+            break;
+        }
+        let Some(v) = val(c) else { continue };
+        buf = (buf << 6) | v;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buf >> bits) as u8);
+        }
+    }
+    out
 }
 
 fn check_use_reduce(fields: &[&str]) -> Result<(), String> {

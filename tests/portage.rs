@@ -2,6 +2,8 @@
 mod atom_parity;
 #[path = "portage/cli_request_parity.rs"]
 mod cli_request_parity;
+#[path = "portage/config_parity.rs"]
+mod config_parity;
 #[path = "portage/dep_accessors_parity.rs"]
 mod dep_accessors_parity;
 #[path = "portage/dep_reduce_parity.rs"]

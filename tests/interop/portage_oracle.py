@@ -67,6 +67,7 @@ def main() -> int:
             use_reduce,
         )
         from portage.exception import InvalidAtom, InvalidDependString
+        from portage.util import varexpand
         from portage.versions import cpv_sort_key, vercmp
     except Exception as exc:  # pragma: no cover - only without portage
         sys.stderr.write(f"portage import failed: {exc}\n")
@@ -258,7 +259,47 @@ def main() -> int:
             value,
         )
 
+    # varexpand - tests/util/test_varExpand.py
+    # Inputs/outputs contain backslashes, quotes and newlines, so the input,
+    # serialized dict, and output are base64-encoded to stay TSV-safe.
+    ve_dict_abc = {"a": "5", "b": "7", "c": "-5"}
+    ve_dict_a = {"a": "5"}
+    ve_cases = [
+        ("$a", ve_dict_abc), ("${a}", ve_dict_abc),
+        ("$b", ve_dict_abc), ("${b}", ve_dict_abc),
+        ("$c", ve_dict_abc), ("${c}", ve_dict_abc),
+        ("\\", {}), ("\\\\", {}), ("\\\\\\", {}), ("\\\\\\\\", {}),
+        ("\\$", {}), ("\\\\$", {}), ("\\a", {}), ("\\b", {}),
+        ("\\n", {}), ("\\r", {}), ("\\t", {}), ("\\\n", {}),
+        ("\\\"", {}), ("\\'", {}),
+        ("\"${a}\"", ve_dict_a), ("'${a}'", ve_dict_a),
+        ("$fail", ve_dict_abc), ("${fail}", ve_dict_abc),
+        ("${unclosed", ve_dict_a), ("${}", ve_dict_a),
+        ("pre${a}post", ve_dict_a), ("$a$b$c", ve_dict_abc),
+        ("trailing$", ve_dict_a), ("a\nb", ve_dict_a),
+    ]
+    for mystring, mydict in ve_cases:
+        result = varexpand(mystring, mydict)
+        emit(
+            out,
+            "varexpand",
+            _b64(mystring),
+            _b64_dict(mydict),
+            _b64(result),
+        )
+
     return 0
+
+
+def _b64(text):
+    import base64
+    return base64.b64encode(text.encode("utf-8")).decode("ascii")
+
+
+def _b64_dict(mydict):
+    # Serialize as k1=v1\x1fk2=v2 then base64, so order-independent compare.
+    items = "\x1f".join(f"{k}={v}" for k, v in sorted(mydict.items()))
+    return _b64(items)
 
 
 def _safe(func, *args):
