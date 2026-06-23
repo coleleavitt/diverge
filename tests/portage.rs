@@ -10,6 +10,8 @@ mod dbapi_parity;
 mod dep_accessors_parity;
 #[path = "portage/dep_reduce_parity.rs"]
 mod dep_reduce_parity;
+#[path = "portage/depgraph_parity.rs"]
+mod depgraph_parity;
 #[path = "portage/manifest_parity.rs"]
 mod manifest_parity;
 #[path = "portage/matching_parity.rs"]
