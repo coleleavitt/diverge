@@ -1,0 +1,6 @@
+# Conventional-commit lint config for `committed` (commit-msg hook).
+# The project's history uses lowercase conventional types (feat:, test:,
+# chore:), so disable the subject-capitalized rule that would otherwise
+# demand "Test:"/"Feat:". Keep the other defaults.
+subject_capitalized = false
+subject_length = 72

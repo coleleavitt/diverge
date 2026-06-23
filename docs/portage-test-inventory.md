@@ -11,6 +11,27 @@ This inventory records every upstream Python test file currently present so dive
 - Current Rust parity test entrypoint: `tests/portage.rs`
 - Coverage command: `cargo llvm-cov --workspace --all-targets --summary-only`
 
+## Interop Differential Oracle
+
+In addition to the hand-transcribed parity ports above, the domain layer is
+cross-checked against the *real* upstream Portage code via a Python interop
+differential test:
+
+- `tests/interop/portage_oracle.py` imports the actual upstream functions from
+  `research/portage/lib` (`vercmp`, `cpv_sort_key`, `dep_getcpv`/`dep_getslot`/
+  `dep_getusedeps`/`dep_getrepo`/`get_operator`/`isjustname`, `paren_reduce`,
+  `use_reduce`, `check_required_use`) over input vectors transcribed from the
+  upstream test files, and emits canonical TSV records of emerge's own output.
+- `tests/interop_differential.rs` runs that oracle and diffs every record
+  against diverge's Rust implementations (currently 278 records).
+- The Rust test **skips cleanly** when `python3` is missing, when the
+  `research/portage` checkout is absent, or when the oracle exits `77`
+  (portage failed to import), so it never breaks CI on machines without the
+  reference checkout.
+- This oracle is the project's defense against circular tests: it caught a real
+  `vercmp` suffix-ordering bug (`_alpha`/`_beta`/`_pre`/`_rc` ranking) that the
+  hand-written ports missed. New domain ports should add input vectors here.
+
 ## Test Areas
 
 | Area | Count | Priority | Porting target |

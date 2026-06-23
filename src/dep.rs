@@ -8,7 +8,7 @@
 use std::collections::HashSet;
 use std::fmt;
 
-use crate::atom::{Atom, AtomParseOptions, DEPENDENCY_ATOM_OPTIONS};
+use crate::atom::{Atom, AtomParseOptions};
 use crate::version::is_version;
 
 /// A reduced dependency node: either a bare token (atom, operator such as
@@ -57,17 +57,20 @@ fn malformed(input: &str) -> DepError {
 
 /// Port of `portage.dep.get_operator`: returns the operator of an atom, with
 /// `=*` for the equal-glob form, or `None` when there is no operator.
+///
+/// Mirrors upstream's bare `Atom(mydep)` construction (no repo/wildcard
+/// allowance), so repository-qualified input is treated as invalid.
 pub fn get_operator(mydep: &str) -> Option<String> {
-    Atom::parse_with_options(mydep, DEPENDENCY_ATOM_OPTIONS)
+    Atom::parse_with_options(mydep, AtomParseOptions::default())
         .ok()?
         .operator
         .map(|op| op.as_portage_str().to_string())
 }
 
 /// Port of `portage.dep.dep_getcpv`: strips operator/slot/use/repo and returns
-/// the bare `category/package-version`.
+/// the bare `category/package-version`. Mirrors upstream's bare `Atom(mydep)`.
 pub fn dep_getcpv(mydep: &str) -> Option<String> {
-    Atom::parse_with_options(mydep, DEPENDENCY_ATOM_OPTIONS)
+    Atom::parse_with_options(mydep, AtomParseOptions::default())
         .ok()
         .map(|atom| atom.cpv())
 }

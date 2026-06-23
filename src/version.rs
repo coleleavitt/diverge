@@ -3,15 +3,24 @@ use std::cmp::Ordering;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Version<'a> {
     base: &'a str,
-    suffix: Option<Suffix<'a>>,
+    suffixes: Vec<Suffix>,
     revision: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct Suffix<'a> {
-    kind: &'a str,
-    number: u64,
+/// A single `_suffix` component. `rank` is upstream's `suffix_value` weight
+/// (`alpha=-4, beta=-3, pre=-2, rc=-1, p=0`); `number` is the trailing count.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Suffix {
+    rank: i64,
+    number: i64,
 }
+
+/// Upstream pads a missing suffix position with `("p", "-1")` so that, e.g.,
+/// `1 < 1_p0`. See `portage.versions.vercmp`.
+const IMPLICIT_SUFFIX: Suffix = Suffix {
+    rank: 0,
+    number: -1,
+};
 
 pub fn vercmp(left: &str, right: &str) -> Ordering {
     Version::parse(left).cmp(&Version::parse(right))
@@ -20,10 +29,10 @@ pub fn vercmp(left: &str, right: &str) -> Ordering {
 impl<'a> Version<'a> {
     pub fn parse(input: &'a str) -> Self {
         let (without_revision, revision) = strip_revision(input);
-        let (base, suffix) = strip_suffix(without_revision);
+        let (base, suffixes) = split_suffixes(without_revision);
         Self {
             base,
-            suffix,
+            suffixes,
             revision,
         }
     }
@@ -32,7 +41,7 @@ impl<'a> Version<'a> {
 impl Ord for Version<'_> {
     fn cmp(&self, other: &Self) -> Ordering {
         compare_base(self.base, other.base)
-            .then_with(|| compare_suffix(&self.suffix, &other.suffix))
+            .then_with(|| compare_suffixes(&self.suffixes, &other.suffixes))
             .then_with(|| self.revision.cmp(&other.revision))
     }
 }
@@ -53,20 +62,38 @@ fn strip_revision(input: &str) -> (&str, u64) {
     (input, 0)
 }
 
-fn strip_suffix(input: &str) -> (&str, Option<Suffix<'_>>) {
-    let Some((base, suffix)) = input.split_once('_') else {
-        return (input, None);
-    };
-    let split = suffix
-        .find(|c: char| c.is_ascii_digit())
-        .unwrap_or(suffix.len());
-    let (kind, number) = suffix.split_at(split);
-    let number = if number.is_empty() {
-        0
-    } else {
-        number.parse().unwrap_or(u64::MAX)
-    };
-    (base, Some(Suffix { kind, number }))
+fn split_suffixes(input: &str) -> (&str, Vec<Suffix>) {
+    let mut parts = input.split('_');
+    let base = parts.next().unwrap_or(input);
+    let suffixes = parts.map(parse_suffix).collect();
+    (base, suffixes)
+}
+
+/// Parses one `_suffix` token into its upstream rank/number. Mirrors
+/// `suffix_value` and the `^(alpha|beta|rc|pre|p)(\d*)$` regexp; `pre` is
+/// checked before `p` so `pre1` is not mis-read as `p`.
+fn parse_suffix(token: &str) -> Suffix {
+    for (name, rank) in [
+        ("alpha", -4),
+        ("beta", -3),
+        ("pre", -2),
+        ("rc", -1),
+        ("p", 0),
+    ] {
+        if let Some(rest) = token.strip_prefix(name)
+            && rest.chars().all(|c| c.is_ascii_digit())
+        {
+            let number = if rest.is_empty() {
+                0
+            } else {
+                rest.parse().unwrap_or(i64::MAX)
+            };
+            return Suffix { rank, number };
+        }
+    }
+    // Unknown suffix token (upstream would reject the version outright). Treat
+    // it as a neutral `p0` so vercmp stays total on lenient input.
+    Suffix { rank: 0, number: 0 }
 }
 
 fn compare_base(left: &str, right: &str) -> Ordering {
@@ -161,25 +188,17 @@ fn compare_numeric(left: &str, right: &str) -> Ordering {
         .then_with(|| right.len().cmp(&left.len()))
 }
 
-fn compare_suffix(left: &Option<Suffix<'_>>, right: &Option<Suffix<'_>>) -> Ordering {
-    let left_rank = left.as_ref().map_or(4, |suffix| suffix_rank(suffix.kind));
-    let right_rank = right.as_ref().map_or(4, |suffix| suffix_rank(suffix.kind));
-    left_rank.cmp(&right_rank).then_with(|| {
-        let left_number = left.as_ref().map_or(0, |suffix| suffix.number);
-        let right_number = right.as_ref().map_or(0, |suffix| suffix.number);
-        left_number.cmp(&right_number)
-    })
-}
-
-fn suffix_rank(kind: &str) -> u8 {
-    match kind {
-        "pre" => 0,
-        "alpha" => 1,
-        "beta" => 2,
-        "rc" => 3,
-        "p" => 5,
-        _ => 4,
+fn compare_suffixes(left: &[Suffix], right: &[Suffix]) -> Ordering {
+    let max = left.len().max(right.len());
+    for index in 0..max {
+        let l = left.get(index).copied().unwrap_or(IMPLICIT_SUFFIX);
+        let r = right.get(index).copied().unwrap_or(IMPLICIT_SUFFIX);
+        let ordering = l.rank.cmp(&r.rank).then_with(|| l.number.cmp(&r.number));
+        if ordering != Ordering::Equal {
+            return ordering;
+        }
     }
+    Ordering::Equal
 }
 
 /// Returns true when `input` looks like a Portage version string
