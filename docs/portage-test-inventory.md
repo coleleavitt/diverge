@@ -82,7 +82,7 @@ differential test:
 | todo | `research/portage/lib/portage/tests/dbapi/test_auxdb.py` | TBD |
 | todo | `research/portage/lib/portage/tests/dbapi/test_bintree.py` | TBD |
 | todo | `research/portage/lib/portage/tests/dbapi/test_bintree_build_id.py` | TBD |
-| todo | `research/portage/lib/portage/tests/dbapi/test_fakedbapi.py` | TBD |
+| ported-representative | `research/portage/lib/portage/tests/dbapi/test_fakedbapi.py` | `tests/portage/dbapi_parity.rs` |
 | todo | `research/portage/lib/portage/tests/dbapi/test_portdb_cache.py` | TBD |
 | ported-representative | `research/portage/lib/portage/tests/dep/test_atom.py` | `tests/portage/atom_parity.rs` |
 | ported-representative | `research/portage/lib/portage/tests/dep/test_best_match_to_list.py` | `tests/portage/matching_parity.rs` |
@@ -292,13 +292,13 @@ differential test:
 | todo | `research/portage/lib/portage/tests/util/futures/test_iter_completed.py` | TBD |
 | todo | `research/portage/lib/portage/tests/util/futures/test_retry.py` | TBD |
 | todo | `research/portage/lib/portage/tests/util/test_atomic_ofstream.py` | TBD |
-| todo | `research/portage/lib/portage/tests/util/test_checksum.py` | TBD |
+| ported-representative | `research/portage/lib/portage/tests/util/test_checksum.py` | `tests/portage/manifest_parity.rs` |
 | todo | `research/portage/lib/portage/tests/util/test_digraph.py` | TBD |
 | todo | `research/portage/lib/portage/tests/util/test_file_copier.py` | TBD |
 | todo | `research/portage/lib/portage/tests/util/test_getconfig.py` | TBD |
 | ported-representative | `research/portage/lib/portage/tests/util/test_grabdict.py` | `tests/portage/util_parity.rs` |
 | todo | `research/portage/lib/portage/tests/util/test_install_mask.py` | TBD |
-| todo | `research/portage/lib/portage/tests/util/test_manifest.py` | TBD |
+| ported-representative | `research/portage/lib/portage/tests/util/test_manifest.py` | `tests/portage/manifest_parity.rs` |
 | todo | `research/portage/lib/portage/tests/util/test_mtimedb.py` | TBD |
 | ported-representative | `research/portage/lib/portage/tests/util/test_normalizedPath.py` | `tests/portage/util_parity.rs` |
 | todo | `research/portage/lib/portage/tests/util/test_shelve.py` | TBD |

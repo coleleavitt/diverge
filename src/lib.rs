@@ -1,9 +1,12 @@
 pub mod atom;
 pub mod cli;
 pub mod config;
+pub mod dbapi;
 pub mod dep;
+pub mod manifest;
 pub mod matching;
 pub mod profile;
+pub mod repository;
 pub mod resolver;
 pub mod util;
 pub mod version;
