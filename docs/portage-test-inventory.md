@@ -85,7 +85,7 @@ differential test:
 | todo | `research/portage/lib/portage/tests/dbapi/test_fakedbapi.py` | TBD |
 | todo | `research/portage/lib/portage/tests/dbapi/test_portdb_cache.py` | TBD |
 | ported-representative | `research/portage/lib/portage/tests/dep/test_atom.py` | `tests/portage/atom_parity.rs` |
-| todo | `research/portage/lib/portage/tests/dep/test_best_match_to_list.py` | TBD |
+| ported-representative | `research/portage/lib/portage/tests/dep/test_best_match_to_list.py` | `tests/portage/matching_parity.rs` |
 | ported-representative | `research/portage/lib/portage/tests/dep/test_check_required_use.py` | `tests/portage/dep_reduce_parity.rs` |
 | ported-representative | `research/portage/lib/portage/tests/dep/test_dep_getcpv.py` | `tests/portage/dep_accessors_parity.rs` |
 | ported-representative | `research/portage/lib/portage/tests/dep/test_dep_getrepo.py` | `tests/portage/dep_accessors_parity.rs` |
@@ -95,11 +95,11 @@ differential test:
 | todo | `research/portage/lib/portage/tests/dep/test_extended_atom_dict.py` | TBD |
 | todo | `research/portage/lib/portage/tests/dep/test_extract_affecting_use.py` | TBD |
 | ported-representative | `research/portage/lib/portage/tests/dep/test_get_operator.py` | `tests/portage/dep_accessors_parity.rs` |
-| todo | `research/portage/lib/portage/tests/dep/test_get_required_use_flags.py` | TBD |
+| ported-representative | `research/portage/lib/portage/tests/dep/test_get_required_use_flags.py` | `tests/portage/matching_parity.rs` |
 | ported-representative | `research/portage/lib/portage/tests/dep/test_isjustname.py` | `tests/portage/dep_accessors_parity.rs` |
 | todo | `research/portage/lib/portage/tests/dep/test_isvalidatom.py` | TBD |
 | todo | `research/portage/lib/portage/tests/dep/test_libc.py` | TBD |
-| todo | `research/portage/lib/portage/tests/dep/test_match_from_list.py` | TBD |
+| ported-representative | `research/portage/lib/portage/tests/dep/test_match_from_list.py` | `tests/portage/matching_parity.rs` |
 | todo | `research/portage/lib/portage/tests/dep/test_overlap_dnf.py` | TBD |
 | ported-representative | `research/portage/lib/portage/tests/dep/test_paren_reduce.py` | `tests/portage/dep_reduce_parity.rs` |
 | todo | `research/portage/lib/portage/tests/dep/test_soname_atom_pickle.py` | TBD |

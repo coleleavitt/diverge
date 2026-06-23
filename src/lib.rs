@@ -2,6 +2,7 @@ pub mod atom;
 pub mod cli;
 pub mod config;
 pub mod dep;
+pub mod matching;
 pub mod resolver;
 pub mod version;
 

@@ -8,6 +8,8 @@ mod config_parity;
 mod dep_accessors_parity;
 #[path = "portage/dep_reduce_parity.rs"]
 mod dep_reduce_parity;
+#[path = "portage/matching_parity.rs"]
+mod matching_parity;
 #[path = "portage/resolver_simple_parity.rs"]
 mod resolver_simple_parity;
 #[path = "portage/version_parity.rs"]

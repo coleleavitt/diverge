@@ -190,6 +190,50 @@ impl Atom {
         self.slot.as_ref().and_then(|slot| slot.operator.as_deref())
     }
 
+    /// Parses this atom's `[...]` USE-dependency group (if any) into typed
+    /// tokens for [`crate::matching`]. Returns `None` when the atom has no USE
+    /// deps. The stored text is already validated by [`Atom::parse_with_options`].
+    pub fn parsed_use_deps(&self) -> Option<crate::matching::ParsedUseDeps> {
+        let raw = self.use_deps.as_ref()?;
+        let body = raw.trim_start_matches('[').trim_end_matches(']');
+        let mut tokens = Vec::new();
+        for token in body.split(',') {
+            let mut flag = token;
+            let negated = if let Some(rest) = flag.strip_prefix('!') {
+                flag = rest;
+                true
+            } else if let Some(rest) = flag.strip_prefix('-') {
+                flag = rest;
+                true
+            } else {
+                false
+            };
+            // Strip conditional suffixes (`=`/`?`) that this matcher ignores.
+            let mut default = None;
+            loop {
+                if let Some(rest) = flag.strip_suffix("(+)") {
+                    default = Some(crate::matching::UseDefault::Enabled);
+                    flag = rest;
+                } else if let Some(rest) = flag.strip_suffix("(-)") {
+                    default = Some(crate::matching::UseDefault::Disabled);
+                    flag = rest;
+                } else if let Some(rest) = flag.strip_suffix('=') {
+                    flag = rest;
+                } else if let Some(rest) = flag.strip_suffix('?') {
+                    flag = rest;
+                } else {
+                    break;
+                }
+            }
+            tokens.push(crate::matching::UseDepToken {
+                name: flag.to_string(),
+                negated,
+                default,
+            });
+        }
+        Some(crate::matching::ParsedUseDeps { tokens })
+    }
+
     pub fn intersects(&self, other: &Self) -> bool {
         if self.cp() != other.cp() {
             return false;
@@ -203,6 +247,49 @@ impl Atom {
             (Some(left), Some(right)) => left == right,
             _ => true,
         }
+    }
+}
+
+impl fmt::Display for Atom {
+    /// Renders the atom back to its canonical string form, mirroring Portage's
+    /// `Atom.__str__` ordering: blocker, operator, cpv, slot, repo, use deps.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.blocker {
+            Some(Blocker::Strong) => f.write_str("!!")?,
+            Some(Blocker::Weak) => f.write_str("!")?,
+            None => {}
+        }
+        if let Some(op) = self.operator {
+            // EqualGlob renders as a leading `=` with a trailing `*` on the cpv.
+            f.write_str(if op == Operator::EqualGlob {
+                "="
+            } else {
+                op.as_portage_str()
+            })?;
+        }
+        write!(f, "{}", self.cpv())?;
+        if matches!(self.operator, Some(Operator::EqualGlob)) {
+            f.write_str("*")?;
+        }
+        if let Some(slot) = &self.slot {
+            f.write_str(":")?;
+            if let Some(name) = &slot.slot {
+                f.write_str(name)?;
+                if let Some(sub) = &slot.sub_slot {
+                    write!(f, "/{sub}")?;
+                }
+            }
+            if let Some(op) = &slot.operator {
+                f.write_str(op)?;
+            }
+        }
+        if let Some(repo) = &self.repo {
+            write!(f, "::{repo}")?;
+        }
+        if let Some(use_deps) = &self.use_deps {
+            f.write_str(use_deps)?;
+        }
+        Ok(())
     }
 }
 
