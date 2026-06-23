@@ -25,7 +25,7 @@ fn simple_resolver_cases_ported_from_portage() {
     let result = fixture.resolve(
         "=dev-libs/A-2",
         &EmergeOptions {
-            autounmask: Some(false),
+            autounmask: diverge::cli::YesNo::No,
             ..EmergeOptions::default()
         },
     );
