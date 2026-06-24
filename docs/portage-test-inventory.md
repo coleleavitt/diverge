@@ -138,7 +138,7 @@ differential test:
 | todo | `research/portage/lib/portage/tests/emaint/test_emaint_binhost.py` | TBD |
 | todo | `research/portage/lib/portage/tests/emaint/test_emaint_world.py` | TBD |
 | ported-complete | `research/portage/lib/portage/tests/emerge/test_actions.py` | `tests/portage/cli_request_parity.rs` |
-| todo | `research/portage/lib/portage/tests/emerge/test_baseline.py` | TBD |
+| ported-representative | `research/portage/lib/portage/tests/emerge/test_baseline.py` | `tests/portage/scheduler_parity.rs` |
 | todo | `research/portage/lib/portage/tests/emerge/test_binpkg_fetch.py` | TBD |
 | ported-representative | `research/portage/lib/portage/tests/emerge/test_config_protect.py` | `tests/portage/executor_parity.rs` |
 | todo | `research/portage/lib/portage/tests/emerge/test_emerge_blocker_file_collision.py` | TBD |

@@ -14,6 +14,7 @@ pub mod config_protect;
 pub mod fetch;
 pub mod merge;
 pub mod phase;
+pub mod scheduler;
 pub mod spawn;
 pub mod unmerge;
 
@@ -29,5 +30,6 @@ pub use phase::{
     build_phases,
     run_build_phases,
 };
+pub use scheduler::{PackagePlan, RunMode, ScheduleResult, Scheduler, TaskRecord, TaskStage};
 pub use spawn::{CommandSpawner, SpawnResult};
 pub use unmerge::{UnmergeError, UnmergeResult, unmerge};
