@@ -39,6 +39,9 @@ pub struct ResolveParams {
     /// When true, an already-installed package satisfying an atom is not
     /// reinstalled (mirrors emerge's default "don't reinstall" behavior).
     pub noreplace: bool,
+    /// When true, propose keyword changes (accept `~arch`) for packages that
+    /// are only available unstable, instead of failing (`--autounmask`).
+    pub autounmask: bool,
     /// Dependency variables to follow, in priority order.
     pub dep_keys: Vec<String>,
 }
@@ -50,6 +53,7 @@ impl Default for ResolveParams {
             accept_keywords: Vec::new(),
             use_flags: BTreeSet::new(),
             noreplace: false,
+            autounmask: false,
             dep_keys: vec![
                 "BDEPEND".to_string(),
                 "DEPEND".to_string(),
@@ -71,6 +75,16 @@ impl ResolveParams {
         self
     }
 
+    pub fn with_autounmask(mut self, enabled: bool) -> Self {
+        self.autounmask = enabled;
+        self
+    }
+
+    /// The unstable variant of the system arch (e.g. `~x86` for `x86`).
+    fn unstable_arch(&self) -> String {
+        format!("~{}", self.arch)
+    }
+
     pub fn with_use<I, S>(mut self, flags: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -90,6 +104,16 @@ impl ResolveParams {
                 || (kw == "**")
         })
     }
+
+    /// True when `keywords` are visible if we also accept the unstable arch
+    /// (used by autounmask to find packages reachable via a keyword change).
+    fn keyword_visible_with_unstable(&self, keywords: &[String]) -> bool {
+        if self.keyword_visible(keywords) {
+            return true;
+        }
+        let unstable = self.unstable_arch();
+        keywords.contains(&unstable)
+    }
 }
 
 /// A single planned operation in the merge list.
@@ -106,11 +130,20 @@ pub struct MergeItem {
 pub struct ResolveOutcome {
     pub mergelist: Vec<String>,
     pub error: Option<ResolveFailure>,
+    /// Autounmask suggestions: cpvs that would need `~arch` accepted for the
+    /// merge list to be installable (mirrors emerge's `unstable_keywords`).
+    /// Non-empty only when autounmask is enabled and keyword changes are needed.
+    pub unstable_keywords: Vec<String>,
 }
 
 impl ResolveOutcome {
     pub fn is_success(&self) -> bool {
         self.error.is_none()
+    }
+
+    /// True when the resolution requires user-approved autounmask changes.
+    pub fn needs_autounmask(&self) -> bool {
+        !self.unstable_keywords.is_empty()
     }
 }
 
@@ -125,6 +158,9 @@ pub enum ResolveFailure {
     CircularDependency(Vec<String>),
     /// A dependency string failed to parse.
     InvalidDependency(String),
+    /// The request is only resolvable with autounmask keyword changes (see the
+    /// outcome's `unstable_keywords`); the user must approve them.
+    AutounmaskRequired,
 }
 
 impl std::fmt::Display for ResolveFailure {
@@ -138,6 +174,12 @@ impl std::fmt::Display for ResolveFailure {
                 write!(f, "circular dependency: {}", cycle.join(" -> "))
             }
             Self::InvalidDependency(msg) => write!(f, "invalid dependency: {msg}"),
+            Self::AutounmaskRequired => {
+                write!(
+                    f,
+                    "autounmask keyword changes required (see unstable_keywords)"
+                )
+            }
         }
     }
 }
@@ -274,6 +316,7 @@ impl<'a> Resolver<'a> {
                 return ResolveOutcome {
                     mergelist: Vec::new(),
                     error: Some(ResolveFailure::InvalidDependency(err.to_string())),
+                    unstable_keywords: Vec::new(),
                 };
             }
         };
@@ -285,12 +328,21 @@ impl<'a> Resolver<'a> {
                     return ResolveOutcome {
                         mergelist,
                         error: None,
+                        unstable_keywords: Vec::new(),
                     };
                 }
                 PassResult::Failed(failure) => {
+                    // Before failing, try autounmask: if accepting the unstable
+                    // arch makes the request resolvable, surface that instead.
+                    if self.params.autounmask
+                        && let Some(outcome) = self.try_autounmask(&parsed, &pins)
+                    {
+                        return outcome;
+                    }
                     return ResolveOutcome {
                         mergelist: Vec::new(),
                         error: Some(failure),
+                        unstable_keywords: Vec::new(),
                     };
                 }
                 PassResult::Conflict(cp) => {
@@ -304,6 +356,7 @@ impl<'a> Resolver<'a> {
                             return ResolveOutcome {
                                 mergelist: Vec::new(),
                                 error: Some(ResolveFailure::Unsatisfied(cp)),
+                                unstable_keywords: Vec::new(),
                             };
                         }
                     }
@@ -315,6 +368,59 @@ impl<'a> Resolver<'a> {
             error: Some(ResolveFailure::Unsatisfied(
                 "backtrack limit exceeded".to_string(),
             )),
+            unstable_keywords: Vec::new(),
+        }
+    }
+
+    /// Attempts to resolve `targets` by also accepting the unstable arch. On
+    /// success, returns an outcome whose `unstable_keywords` lists the cpvs that
+    /// require a keyword change, with `error` still set (the caller must approve
+    /// the change), mirroring emerge's `--autounmask` reporting.
+    fn try_autounmask(
+        &self,
+        targets: &[Atom],
+        pins: &BTreeMap<String, String>,
+    ) -> Option<ResolveOutcome> {
+        let relaxed = Resolver {
+            available: self.available,
+            installed: self.installed,
+            params: ResolveParams {
+                accept_keywords: {
+                    let mut kw = self.params.accept_keywords.clone();
+                    kw.push(self.params.unstable_arch());
+                    kw
+                },
+                autounmask: false,
+                ..self.params.clone()
+            },
+        };
+
+        match relaxed.resolve_pass(targets, pins) {
+            PassResult::Resolved(mergelist) => {
+                // Flag the cpvs that are only visible because of the unstable arch.
+                let unstable_keywords: Vec<String> = mergelist
+                    .iter()
+                    .filter(|cpv| {
+                        self.available
+                            .metadata(cpv)
+                            .map(|m| {
+                                !self.params.keyword_visible(&m.keywords)
+                                    && self.params.keyword_visible_with_unstable(&m.keywords)
+                            })
+                            .unwrap_or(false)
+                    })
+                    .cloned()
+                    .collect();
+                if unstable_keywords.is_empty() {
+                    return None;
+                }
+                Some(ResolveOutcome {
+                    mergelist,
+                    error: Some(ResolveFailure::AutounmaskRequired),
+                    unstable_keywords,
+                })
+            }
+            _ => None,
         }
     }
 

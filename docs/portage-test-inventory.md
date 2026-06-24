@@ -192,9 +192,9 @@ differential test:
 | todo | `research/portage/lib/portage/tests/resolver/soname/test_unsatisfied.py` | TBD |
 | todo | `research/portage/lib/portage/tests/resolver/test_aggressive_backtrack_downgrade.py` | TBD |
 | todo | `research/portage/lib/portage/tests/resolver/test_alternatives_gzip.py` | TBD |
-| todo | `research/portage/lib/portage/tests/resolver/test_autounmask.py` | TBD |
+| ported-representative | `research/portage/lib/portage/tests/resolver/test_autounmask.py` | `tests/portage/autounmask_parity.rs` |
 | todo | `research/portage/lib/portage/tests/resolver/test_autounmask_binpkg_use.py` | TBD |
-| todo | `research/portage/lib/portage/tests/resolver/test_autounmask_keep_keywords.py` | TBD |
+| ported-representative | `research/portage/lib/portage/tests/resolver/test_autounmask_keep_keywords.py` | `tests/portage/autounmask_parity.rs` |
 | todo | `research/portage/lib/portage/tests/resolver/test_autounmask_multilib_use.py` | TBD |
 | todo | `research/portage/lib/portage/tests/resolver/test_autounmask_parent.py` | TBD |
 | todo | `research/portage/lib/portage/tests/resolver/test_autounmask_use_backtrack.py` | TBD |
