@@ -20,6 +20,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use diverge::atom::{Atom, AtomParseOptions};
 use diverge::config::{getconfig, varexpand};
 use diverge::dep::{
     Dep,
@@ -35,6 +36,7 @@ use diverge::dep::{
     paren_reduce,
     use_reduce,
 };
+use diverge::matching::{Candidate, match_from_list};
 use diverge::version::{cpv_cmp, vercmp};
 
 const NUL: &str = "\u{0}";
@@ -171,12 +173,43 @@ fn check_record(fields: &[&str]) -> Result<(), String> {
             };
             same(kind, &[fields[1]], fields[2], &got)
         }
+        "match_from_list" => check_match_from_list(fields),
         "use_reduce" => check_use_reduce(fields),
         "check_required_use" => check_cru(fields),
         "varexpand" => check_varexpand(fields),
         "getconfig" => check_getconfig(fields),
         other => Err(format!("unknown record kind '{other}'")),
     }
+}
+
+fn check_match_from_list(fields: &[&str]) -> Result<(), String> {
+    let atom_str = fields[1];
+    let candidates: Vec<Candidate> = fields[2]
+        .split(' ')
+        .filter(|s| !s.is_empty())
+        .map(Candidate::new)
+        .collect();
+    let expected = fields[3];
+
+    let atom = match Atom::parse_with_options(
+        atom_str,
+        AtomParseOptions {
+            allow_wildcard: true,
+            allow_repo: true,
+        },
+    ) {
+        Ok(atom) => atom,
+        Err(_) => {
+            // Upstream also records ERR for an invalid atom.
+            return same("match_from_list", &[atom_str, fields[2]], expected, ERR);
+        }
+    };
+    let got = match_from_list(&atom, &candidates)
+        .into_iter()
+        .map(|c| c.cpv.clone())
+        .collect::<Vec<_>>()
+        .join(" ");
+    same("match_from_list", &[atom_str, fields[2]], expected, &got)
 }
 
 fn check_getconfig(fields: &[&str]) -> Result<(), String> {

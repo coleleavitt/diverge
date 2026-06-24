@@ -56,6 +56,7 @@ def emit(out, *fields):
 def main() -> int:
     try:
         from portage.dep import (
+            Atom,
             check_required_use,
             dep_getcpv,
             dep_getrepo,
@@ -63,6 +64,7 @@ def main() -> int:
             dep_getusedeps,
             get_operator,
             isjustname,
+            match_from_list,
             paren_reduce,
             use_reduce,
         )
@@ -152,6 +154,31 @@ def main() -> int:
         except (InvalidAtom, InvalidDependString):
             value = ERR
         emit(out, "dep_getusedeps", mydep, value)
+
+    # match_from_list - tests/dep/test_match_from_list.py
+    # Each case is (atom, [bare cpv candidates]); the oracle emits the matching
+    # cpvs in input order. Only bare-cpv candidates are used so both sides agree
+    # on the candidate projection (no slot/use metadata on the candidate side).
+    match_cases = [
+        ("=sys-apps/portage-45*", ["sys-apps/portage-045"]),
+        ("=sys-apps/portage-045", ["sys-apps/portage-045", "sys-apps/portage-046"]),
+        ("~sys-apps/portage-045", ["sys-apps/portage-045-r1", "sys-apps/portage-046-r1"]),
+        ("<=sys-apps/portage-045", ["sys-apps/portage-045", "sys-apps/portage-046"]),
+        (">sys-apps/portage-044", ["sys-apps/portage-045", "sys-apps/portage-044"]),
+        ("=cat/pkg-1.1*", ["cat/pkg-1.1-r1", "cat/pkg-1.10-r1"]),
+        ("=cat/pkg-1-r1*", ["cat/pkg-1-r11", "cat/pkg-1-r1"]),
+        ("*/*", ["dev-libs/A-1", "dev-libs/B-1"]),
+        ("dev-libs/*", ["dev-libs/A-1", "sci-libs/B-1"]),
+        ("*/udev", ["sys-fs/udev-456", "sys-apps/portage-2"]),
+    ]
+    for atom_str, candidates in match_cases:
+        try:
+            atom = Atom(atom_str, allow_wildcard=True, allow_repo=True)
+            matched = match_from_list(atom, candidates)
+            value = " ".join(matched)
+        except (InvalidAtom, InvalidDependString):
+            value = ERR
+        emit(out, "match_from_list", atom_str, " ".join(candidates), value)
 
     # paren_reduce - tests/dep/test_paren_reduce.py
     paren_inputs = [

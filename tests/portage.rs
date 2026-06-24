@@ -14,6 +14,8 @@ mod dep_accessors_parity;
 mod dep_reduce_parity;
 #[path = "portage/depgraph_parity.rs"]
 mod depgraph_parity;
+#[path = "portage/end_to_end.rs"]
+mod end_to_end;
 #[path = "portage/executor_parity.rs"]
 mod executor_parity;
 #[path = "portage/manifest_parity.rs"]

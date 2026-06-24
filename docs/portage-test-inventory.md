@@ -7,9 +7,31 @@ This inventory records every upstream Python test file currently present so dive
 ## Summary
 
 - Upstream test files inventoried: 239
-- Representative Rust ports currently implemented: 8 test files (14 ported upstream test files) / 30 Rust tests
+- Representative Rust ports currently implemented: 20 parity modules (~30 ported
+  upstream test files) / 118 Rust parity tests, plus the interop differential
+  oracle and an end-to-end integration test exercising all layers together.
 - Current Rust parity test entrypoint: `tests/portage.rs`
 - Coverage command: `cargo llvm-cov --workspace --all-targets --summary-only`
+  (currently ~86% line coverage)
+
+### Layer coverage map (single crate, layered modules)
+
+| Layer | Modules | Parity tests |
+| --- | --- | --- |
+| Domain | `atom`, `version`, `dep`, `matching` | atom/version/dep/matching parity |
+| Config | `config`, `util`, `profile` | config/util/profile parity |
+| Repository | `dbapi`, `repository`, `manifest` | dbapi/repository/manifest parity |
+| Resolver | `depgraph` | depgraph parity |
+| Interpretation | `cli`, `sets`, `update` | cli + binpkg/sets parity |
+| Executor | `executor::{config_protect,merge,unmerge,phase}` | executor + phase parity |
+| Binpkg | `xpak` | binpkg/sets parity |
+| Integration | all of the above | `end_to_end.rs` |
+
+The crate is intentionally still single-crate per `CLAUDE.md` ("keep this as an
+architectural direction, not a reason to split crates before tests prove the
+boundaries"). The module layering above mirrors the eventual
+`diverge-core`/`-repository`/`-resolver`/`-executor`/`-cli` split and the
+`end_to_end` test proves the boundaries compose.
 
 ## Interop Differential Oracle
 
