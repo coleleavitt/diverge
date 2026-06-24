@@ -9,34 +9,10 @@
 //! - `research/portage/lib/portage/tests/resolver/test_blocker.py`
 //! - `research/portage/lib/portage/tests/resolver/test_merge_order.py`
 
-use diverge::dbapi::{PackageDb, PackageMetadata};
+use diverge::dbapi::PackageDb;
 use diverge::depgraph::{ResolveFailure, ResolveParams, Resolver};
 
-/// Builds metadata with a SLOT, KEYWORDS=x86, and dependency strings.
-fn pkg(deps: &[(&str, &str)]) -> PackageMetadata {
-    let mut meta = PackageMetadata {
-        slot: Some("0".to_string()),
-        sub_slot: None,
-        repo: Some("test_repo".to_string()),
-        eapi: Some("7".to_string()),
-        iuse: Vec::new(),
-        use_enabled: Vec::new(),
-        keywords: vec!["x86".to_string()],
-        deps: Default::default(),
-    };
-    for (k, v) in deps {
-        meta.deps.insert((*k).to_string(), (*v).to_string());
-    }
-    meta
-}
-
-fn db(entries: &[(&str, PackageMetadata)]) -> PackageDb {
-    let mut db = PackageDb::new();
-    for (cpv, meta) in entries {
-        db.insert(*cpv, meta.clone());
-    }
-    db
-}
+use crate::resolver_fixture::{db, pkg};
 
 #[test]
 fn resolves_simple_dependency_chain() {

@@ -286,7 +286,8 @@ impl GraphBuilder<'_> {
     }
 
     /// Collects the dependency atoms of `cpv` by reducing its dependency
-    /// strings with the active USE flags, resolving `|| ( ... )` choices.
+    /// strings with the active USE flags, resolving `|| ( ... )` choices with
+    /// cross-choice overlap minimization (bug 632026).
     fn dependencies_of(&self, cpv: &str) -> Result<Vec<(Atom, Option<bool>)>, ResolveFailure> {
         let Some(metadata) = self.resolver.available.metadata(cpv) else {
             return Ok(Vec::new());
@@ -304,6 +305,7 @@ impl GraphBuilder<'_> {
         };
 
         let mut atoms = Vec::new();
+        let mut or_choices: Vec<Vec<Vec<(Atom, Option<bool>)>>> = Vec::new();
         for key in &self.resolver.params.dep_keys {
             let Some(dep_str) = metadata.deps.get(key) else {
                 continue;
@@ -313,87 +315,154 @@ impl GraphBuilder<'_> {
             }
             let reduced = use_reduce(dep_str, &options)
                 .map_err(|err| ResolveFailure::InvalidDependency(err.to_string()))?;
-            self.collect_atoms(&reduced, &mut atoms)?;
+            self.collect_atoms(&reduced, &mut atoms, &mut or_choices)?;
         }
+        // Resolve the package's || ( ... ) choices together so overlapping
+        // alternatives like "|| ( A B ) || ( B C )" share a provider (B).
+        self.resolve_or_choices(&or_choices, &mut atoms);
         Ok(atoms)
     }
 
-    /// Walks a reduced dependency structure, picking atoms and resolving any
-    /// `|| ( ... )` choice to its first satisfiable branch.
+    /// Walks a reduced dependency structure, pushing plain atoms into `out` and
+    /// collecting each `|| ( ... )` choice's branch list into `or_choices` for
+    /// later overlap-aware resolution.
     fn collect_atoms(
         &self,
         nodes: &[Dep],
         out: &mut Vec<(Atom, Option<bool>)>,
+        or_choices: &mut Vec<Vec<Vec<(Atom, Option<bool>)>>>,
     ) -> Result<(), ResolveFailure> {
         let mut iter = nodes.iter().peekable();
         while let Some(node) = iter.next() {
             match node {
                 Dep::Token(token) if token == "||" => {
-                    // The next node is the group of alternatives.
                     if let Some(Dep::Group(choices)) = iter.next() {
-                        self.resolve_or_choice(choices, out)?;
+                        or_choices.push(self.choice_branches(choices)?);
                     }
                 }
                 Dep::Token(token) => {
                     let (atom, blocker) = parse_dep_token(token)?;
                     out.push((atom, blocker));
                 }
-                Dep::Group(inner) => self.collect_atoms(inner, out)?,
+                Dep::Group(inner) => self.collect_atoms(inner, out, or_choices)?,
             }
         }
         Ok(())
     }
 
-    /// Resolves an `|| ( a b ... )` choice: prefer an already-installed or
-    /// available branch, falling back to the first branch. Mirrors emerge's
-    /// preference for not pulling in new packages when a choice is satisfied.
-    fn resolve_or_choice(
+    /// Reduces an `|| ( ... )` group into its branches; each branch is a flat
+    /// atom list (a parenthesized branch contributes all of its atoms).
+    fn choice_branches(
         &self,
         choices: &[Dep],
-        out: &mut Vec<(Atom, Option<bool>)>,
-    ) -> Result<(), ResolveFailure> {
-        // Each choice is either a single atom token or a parenthesized group.
-        let branches: Vec<Vec<(Atom, Option<bool>)>> = {
-            let mut branches = Vec::new();
-            for choice in choices {
-                let mut branch = Vec::new();
-                match choice {
-                    Dep::Token(token) => {
-                        let (atom, blocker) = parse_dep_token(token)?;
-                        branch.push((atom, blocker));
-                    }
-                    Dep::Group(inner) => self.collect_atoms(inner, &mut branch)?,
+    ) -> Result<Vec<Vec<(Atom, Option<bool>)>>, ResolveFailure> {
+        let mut branches = Vec::new();
+        for choice in choices {
+            let mut branch = Vec::new();
+            let mut nested = Vec::new();
+            match choice {
+                Dep::Token(token) => {
+                    let (atom, blocker) = parse_dep_token(token)?;
+                    branch.push((atom, blocker));
                 }
-                branches.push(branch);
+                Dep::Group(inner) => self.collect_atoms(inner, &mut branch, &mut nested)?,
             }
-            branches
-        };
+            branches.push(branch);
+        }
+        Ok(branches)
+    }
 
-        // Prefer a branch already satisfied by installed packages.
-        for branch in &branches {
-            if branch
-                .iter()
-                .all(|(atom, blk)| blk.is_some() || self.resolver.installed_satisfies(atom))
-            {
-                out.extend(branch.clone());
-                return Ok(());
+    /// Resolves every collected `|| ( ... )` choice, preferring (in order):
+    /// an installed-satisfied branch, a branch already chosen by an earlier
+    /// choice, a branch overlapping another unresolved choice (minimize the
+    /// number of providers), then the first available branch.
+    fn resolve_or_choices(
+        &self,
+        or_choices: &[Vec<Vec<(Atom, Option<bool>)>>],
+        out: &mut Vec<(Atom, Option<bool>)>,
+    ) {
+        let mut committed: BTreeSet<String> = BTreeSet::new();
+        for (index, branches) in or_choices.iter().enumerate() {
+            let chosen = self.pick_branch(branches, &committed, or_choices, index);
+            for (atom, blk) in &chosen {
+                if blk.is_none()
+                    && let Some(cpv) = self.resolver.select_available(atom)
+                {
+                    committed.insert(cpv);
+                }
             }
+            out.extend(chosen);
         }
-        // Otherwise the first branch whose atoms are all available.
-        for branch in &branches {
-            if branch
-                .iter()
-                .all(|(atom, blk)| blk.is_some() || self.resolver.select_available(atom).is_some())
-            {
-                out.extend(branch.clone());
-                return Ok(());
-            }
+    }
+
+    /// Picks the best branch of one `|| ( ... )` choice given the providers
+    /// already committed by earlier choices and the remaining choices.
+    fn pick_branch(
+        &self,
+        branches: &[Vec<(Atom, Option<bool>)>],
+        committed: &BTreeSet<String>,
+        all_choices: &[Vec<Vec<(Atom, Option<bool>)>>],
+        index: usize,
+    ) -> Vec<(Atom, Option<bool>)> {
+        // 1. A branch already satisfied by installed packages.
+        if let Some(branch) = branches.iter().find(|b| {
+            b.iter()
+                .all(|(a, blk)| blk.is_some() || self.resolver.installed_satisfies(a))
+        }) {
+            return branch.clone();
         }
-        // Fall back to the first branch (will surface an unsatisfied error).
-        if let Some(first) = branches.into_iter().next() {
-            out.extend(first);
+        // 2. A branch whose providers are already committed by an earlier choice.
+        if let Some(branch) = branches.iter().find(|b| {
+            b.iter().all(|(a, blk)| {
+                blk.is_some()
+                    || self
+                        .resolver
+                        .select_available(a)
+                        .is_some_and(|cpv| committed.contains(&cpv))
+            })
+        }) {
+            return branch.clone();
         }
-        Ok(())
+        // 3. A branch whose provider also satisfies a later, not-yet-resolved
+        //    choice (so one package covers both) — minimize children.
+        if let Some(branch) = branches.iter().find(|b| {
+            b.iter().any(|(a, blk)| {
+                blk.is_none()
+                    && self
+                        .resolver
+                        .select_available(a)
+                        .is_some_and(|cpv| self.satisfies_other_choice(&cpv, all_choices, index))
+            })
+        }) {
+            return branch.clone();
+        }
+        // 4. The first branch whose atoms are all available.
+        if let Some(branch) = branches.iter().find(|b| {
+            b.iter()
+                .all(|(a, blk)| blk.is_some() || self.resolver.select_available(a).is_some())
+        }) {
+            return branch.clone();
+        }
+        // 5. Fall back to the first branch (surfaces an unsatisfied error later).
+        branches.first().cloned().unwrap_or_default()
+    }
+
+    /// True when `cpv` satisfies at least one branch-atom of some choice other
+    /// than `index` (used to favor providers shared across `|| ( ... )` groups).
+    fn satisfies_other_choice(
+        &self,
+        cpv: &str,
+        all_choices: &[Vec<Vec<(Atom, Option<bool>)>>],
+        index: usize,
+    ) -> bool {
+        all_choices.iter().enumerate().any(|(other, branches)| {
+            other != index
+                && branches.iter().any(|b| {
+                    b.iter().any(|(a, blk)| {
+                        blk.is_none() && package_matches_atom(self.resolver.available, cpv, a)
+                    })
+                })
+        })
     }
 
     /// Finalizes the graph: checks blockers, then topologically orders the

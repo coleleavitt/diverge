@@ -284,8 +284,8 @@ differential test:
 | todo | `research/portage/lib/portage/tests/resolver/test_use_dep_defaults.py` | TBD |
 | todo | `research/portage/lib/portage/tests/resolver/test_useflags.py` | TBD |
 | todo | `research/portage/lib/portage/tests/resolver/test_virtual_cycle.py` | TBD |
-| todo | `research/portage/lib/portage/tests/resolver/test_virtual_minimize_children.py` | TBD |
-| todo | `research/portage/lib/portage/tests/resolver/test_virtual_slot.py` | TBD |
+| ported-representative | `research/portage/lib/portage/tests/resolver/test_virtual_minimize_children.py` | `tests/portage/virtual_parity.rs` |
+| ported-representative | `research/portage/lib/portage/tests/resolver/test_virtual_slot.py` | `tests/portage/virtual_parity.rs` |
 | todo | `research/portage/lib/portage/tests/resolver/test_with_test_deps.py` | TBD |
 | todo | `research/portage/lib/portage/tests/resolver/test_world_warning.py` | TBD |
 | ported-representative | `research/portage/lib/portage/tests/sets/base/test_internal_package_set.py` | `tests/portage/binpkg_sets_parity.rs` |

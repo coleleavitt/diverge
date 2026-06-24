@@ -1,3 +1,6 @@
+#[path = "portage/resolver_fixture.rs"]
+mod resolver_fixture;
+
 #[path = "portage/atom_parity.rs"]
 mod atom_parity;
 #[path = "portage/binpkg_sets_parity.rs"]
@@ -36,3 +39,5 @@ mod util_parity;
 mod version_parity;
 #[path = "portage/version_sort_parity.rs"]
 mod version_sort_parity;
+#[path = "portage/virtual_parity.rs"]
+mod virtual_parity;
