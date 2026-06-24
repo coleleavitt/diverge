@@ -18,6 +18,8 @@ mod executor_parity;
 mod manifest_parity;
 #[path = "portage/matching_parity.rs"]
 mod matching_parity;
+#[path = "portage/phase_parity.rs"]
+mod phase_parity;
 #[path = "portage/profile_parity.rs"]
 mod profile_parity;
 #[path = "portage/repository_parity.rs"]

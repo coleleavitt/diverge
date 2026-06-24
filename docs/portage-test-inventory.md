@@ -118,7 +118,7 @@ differential test:
 | ported-complete | `research/portage/lib/portage/tests/emerge/test_actions.py` | `tests/portage/cli_request_parity.rs` |
 | todo | `research/portage/lib/portage/tests/emerge/test_baseline.py` | TBD |
 | todo | `research/portage/lib/portage/tests/emerge/test_binpkg_fetch.py` | TBD |
-| todo | `research/portage/lib/portage/tests/emerge/test_config_protect.py` | TBD |
+| ported-representative | `research/portage/lib/portage/tests/emerge/test_config_protect.py` | `tests/portage/executor_parity.rs` |
 | todo | `research/portage/lib/portage/tests/emerge/test_emerge_blocker_file_collision.py` | TBD |
 | todo | `research/portage/lib/portage/tests/emerge/test_emerge_slot_abi.py` | TBD |
 | todo | `research/portage/lib/portage/tests/emerge/test_global_updates.py` | TBD |

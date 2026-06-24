@@ -12,8 +12,18 @@
 
 pub mod config_protect;
 pub mod merge;
+pub mod phase;
 pub mod unmerge;
 
 pub use config_protect::ConfigProtect;
 pub use merge::{ContentEntry, MergeError, MergeResult, MergeTransaction};
+pub use phase::{
+    BuildDirs,
+    Phase,
+    PhaseContext,
+    PhaseOutcome,
+    PhaseSpawner,
+    build_phases,
+    run_build_phases,
+};
 pub use unmerge::{UnmergeError, UnmergeResult, unmerge};
