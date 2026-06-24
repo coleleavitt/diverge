@@ -266,7 +266,7 @@ differential test:
 | todo | `research/portage/lib/portage/tests/resolver/test_virtual_slot.py` | TBD |
 | todo | `research/portage/lib/portage/tests/resolver/test_with_test_deps.py` | TBD |
 | todo | `research/portage/lib/portage/tests/resolver/test_world_warning.py` | TBD |
-| todo | `research/portage/lib/portage/tests/sets/base/test_internal_package_set.py` | TBD |
+| ported-representative | `research/portage/lib/portage/tests/sets/base/test_internal_package_set.py` | `tests/portage/binpkg_sets_parity.rs` |
 | todo | `research/portage/lib/portage/tests/sets/base/test_variable_set.py` | TBD |
 | todo | `research/portage/lib/portage/tests/sets/base/test_wildcard_package_set.py` | TBD |
 | todo | `research/portage/lib/portage/tests/sets/files/test_config_file_set.py` | TBD |
@@ -275,9 +275,9 @@ differential test:
 | todo | `research/portage/lib/portage/tests/sync/test_sync_local.py` | TBD |
 | todo | `research/portage/lib/portage/tests/sync/test_sync_zipfile.py` | TBD |
 | todo | `research/portage/lib/portage/tests/unicode/test_string_format.py` | TBD |
-| todo | `research/portage/lib/portage/tests/update/test_move_ent.py` | TBD |
-| todo | `research/portage/lib/portage/tests/update/test_move_slot_ent.py` | TBD |
-| todo | `research/portage/lib/portage/tests/update/test_update_dbentry.py` | TBD |
+| ported-representative | `research/portage/lib/portage/tests/update/test_move_ent.py` | `tests/portage/binpkg_sets_parity.rs` |
+| ported-representative | `research/portage/lib/portage/tests/update/test_move_slot_ent.py` | `tests/portage/binpkg_sets_parity.rs` |
+| ported-representative | `research/portage/lib/portage/tests/update/test_update_dbentry.py` | `tests/portage/binpkg_sets_parity.rs` |
 | todo | `research/portage/lib/portage/tests/util/dyn_libs/test_installed_dynlibs.py` | TBD |
 | todo | `research/portage/lib/portage/tests/util/dyn_libs/test_soname_deps.py` | TBD |
 | todo | `research/portage/lib/portage/tests/util/eventloop/test_call_soon_fifo.py` | TBD |
@@ -312,4 +312,4 @@ differential test:
 | todo | `research/portage/lib/portage/tests/util/test_xattr.py` | TBD |
 | ported-representative | `research/portage/lib/portage/tests/versions/test_cpv_sort_key.py` | `tests/portage/version_sort_parity.rs` |
 | ported-representative | `research/portage/lib/portage/tests/versions/test_vercmp.py` | `tests/portage/version_parity.rs` |
-| todo | `research/portage/lib/portage/tests/xpak/test_decodeint.py` | TBD |
+| ported-representative | `research/portage/lib/portage/tests/xpak/test_decodeint.py` | `tests/portage/binpkg_sets_parity.rs` |

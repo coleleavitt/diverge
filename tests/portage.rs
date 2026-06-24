@@ -1,5 +1,7 @@
 #[path = "portage/atom_parity.rs"]
 mod atom_parity;
+#[path = "portage/binpkg_sets_parity.rs"]
+mod binpkg_sets_parity;
 #[path = "portage/cli_request_parity.rs"]
 mod cli_request_parity;
 #[path = "portage/config_parity.rs"]
