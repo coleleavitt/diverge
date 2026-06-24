@@ -6,17 +6,9 @@
 //! - `research/portage/lib/portage/package/ebuild/config.py` (incremental
 //!   stacking of `make.defaults`, `package.use`, `package.mask`)
 
-use std::fs;
-use std::path::Path;
-
 use diverge::profile::{ProfileStack, StackedProfile};
 
-fn write(path: &Path, content: &str) {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).expect("create profile dir");
-    }
-    fs::write(path, content).expect("write profile file");
-}
+use crate::fs_fixture::write;
 
 /// Builds a base <- middle <- leaf profile chain in a tempdir and returns the
 /// leaf directory path along with the tempdir guard.

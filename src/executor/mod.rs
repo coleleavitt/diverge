@@ -11,11 +11,14 @@
 //! transactions are fully testable against isolated temp roots.
 
 pub mod config_protect;
+pub mod fetch;
 pub mod merge;
 pub mod phase;
+pub mod spawn;
 pub mod unmerge;
 
 pub use config_protect::ConfigProtect;
+pub use fetch::{FetchError, FetchResult, Fetcher, LocalFetcher, Source, fetch_all, fetch_one};
 pub use merge::{ContentEntry, MergeError, MergeResult, MergeTransaction};
 pub use phase::{
     BuildDirs,
@@ -26,4 +29,5 @@ pub use phase::{
     build_phases,
     run_build_phases,
 };
+pub use spawn::{CommandSpawner, SpawnResult};
 pub use unmerge::{UnmergeError, UnmergeResult, unmerge};

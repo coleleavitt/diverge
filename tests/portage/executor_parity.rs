@@ -8,17 +8,11 @@
 //! - `research/portage/lib/portage/tests/emerge/test_config_protect.py`
 
 use std::fs;
-use std::path::Path;
 
 use diverge::executor::config_protect::ConfigProtect;
 use diverge::executor::{ContentEntry, MergeError, MergeTransaction, unmerge};
 
-fn write(path: &Path, content: &str) {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).expect("mkdir");
-    }
-    fs::write(path, content).expect("write");
-}
+use crate::fs_fixture::write;
 
 #[test]
 fn config_protect_is_protected_respects_mask() {

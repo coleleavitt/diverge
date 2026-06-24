@@ -5,16 +5,10 @@
 //! `<repo>/profiles/repo_name`).
 
 use std::fs;
-use std::path::Path;
 
 use diverge::repository::Repository;
 
-fn write(path: &Path, content: &str) {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).expect("create dir");
-    }
-    fs::write(path, content).expect("write file");
-}
+use crate::fs_fixture::write;
 
 fn ebuild(metadata: &[(&str, &str)]) -> String {
     metadata

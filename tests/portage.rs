@@ -1,3 +1,5 @@
+#[path = "portage/fs_fixture.rs"]
+mod fs_fixture;
 #[path = "portage/resolver_fixture.rs"]
 mod resolver_fixture;
 
@@ -27,6 +29,8 @@ mod depgraph_parity;
 mod end_to_end;
 #[path = "portage/executor_parity.rs"]
 mod executor_parity;
+#[path = "portage/fetch_spawn_parity.rs"]
+mod fetch_spawn_parity;
 #[path = "portage/manifest_parity.rs"]
 mod manifest_parity;
 #[path = "portage/matching_parity.rs"]

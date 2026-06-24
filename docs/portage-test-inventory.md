@@ -130,10 +130,10 @@ differential test:
 | todo | `research/portage/lib/portage/tests/ebuild/test_array_fromfile_eof.py` | TBD |
 | todo | `research/portage/lib/portage/tests/ebuild/test_config.py` | TBD |
 | todo | `research/portage/lib/portage/tests/ebuild/test_doebuild_fd_pipes.py` | TBD |
-| todo | `research/portage/lib/portage/tests/ebuild/test_doebuild_spawn.py` | TBD |
-| todo | `research/portage/lib/portage/tests/ebuild/test_fetch.py` | TBD |
+| ported-representative | `research/portage/lib/portage/tests/ebuild/test_doebuild_spawn.py` | `tests/portage/fetch_spawn_parity.rs` |
+| ported-representative | `research/portage/lib/portage/tests/ebuild/test_fetch.py` | `tests/portage/fetch_spawn_parity.rs` |
 | todo | `research/portage/lib/portage/tests/ebuild/test_ipc_daemon.py` | TBD |
-| todo | `research/portage/lib/portage/tests/ebuild/test_spawn.py` | TBD |
+| ported-representative | `research/portage/lib/portage/tests/ebuild/test_spawn.py` | `tests/portage/fetch_spawn_parity.rs` |
 | todo | `research/portage/lib/portage/tests/ebuild/test_use_expand_incremental.py` | TBD |
 | todo | `research/portage/lib/portage/tests/emaint/test_emaint_binhost.py` | TBD |
 | todo | `research/portage/lib/portage/tests/emaint/test_emaint_world.py` | TBD |
