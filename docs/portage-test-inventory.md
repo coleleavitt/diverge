@@ -200,7 +200,7 @@ differential test:
 | todo | `research/portage/lib/portage/tests/resolver/test_autounmask_use_backtrack.py` | TBD |
 | todo | `research/portage/lib/portage/tests/resolver/test_autounmask_use_breakage.py` | TBD |
 | todo | `research/portage/lib/portage/tests/resolver/test_autounmask_use_slot_conflict.py` | TBD |
-| todo | `research/portage/lib/portage/tests/resolver/test_backtracking.py` | TBD |
+| ported-representative | `research/portage/lib/portage/tests/resolver/test_backtracking.py` | `tests/portage/backtracking_parity.rs` |
 | todo | `research/portage/lib/portage/tests/resolver/test_bdeps.py` | TBD |
 | todo | `research/portage/lib/portage/tests/resolver/test_binary_pkg_ebuild_visibility.py` | TBD |
 | todo | `research/portage/lib/portage/tests/resolver/test_binpackage_downgrades_slot_dep.py` | TBD |

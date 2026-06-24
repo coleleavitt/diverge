@@ -3,6 +3,8 @@ mod resolver_fixture;
 
 #[path = "portage/atom_parity.rs"]
 mod atom_parity;
+#[path = "portage/backtracking_parity.rs"]
+mod backtracking_parity;
 #[path = "portage/binpkg_sets_parity.rs"]
 mod binpkg_sets_parity;
 #[path = "portage/cli_request_parity.rs"]

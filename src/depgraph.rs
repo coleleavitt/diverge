@@ -149,6 +149,9 @@ pub struct Resolver<'a> {
     params: ResolveParams,
 }
 
+/// Upper bound on backtracking iterations (constraint-propagation passes).
+const MAX_BACKTRACK: usize = 16;
+
 /// Internal node state during graph construction.
 struct GraphBuilder<'a> {
     resolver: &'a Resolver<'a>,
@@ -160,6 +163,20 @@ struct GraphBuilder<'a> {
     blockers: Vec<(Atom, String)>,
     /// Atoms currently being expanded, to detect cycles.
     in_progress: Vec<String>,
+    /// Backtracking pins: cp -> the single cpv that may satisfy that cp.
+    pins: BTreeMap<String, String>,
+    /// Every non-blocker dependency/target atom encountered, by cp, used to
+    /// detect slot conflicts and compute a shared version when backtracking.
+    atoms_by_cp: BTreeMap<String, Vec<Atom>>,
+}
+
+/// The result of one resolution pass: either a finished merge list or a slot
+/// conflict that backtracking may be able to resolve by pinning a version.
+enum PassResult {
+    Resolved(Vec<String>),
+    /// A cp had conflicting selections; the value is the cp to re-pin.
+    Conflict(String),
+    Failed(ResolveFailure),
 }
 
 impl<'a> Resolver<'a> {
@@ -174,6 +191,18 @@ impl<'a> Resolver<'a> {
     /// Selects the best visible available cpv matching `atom`: highest version
     /// among keyword-visible matches.
     fn select_available(&self, atom: &Atom) -> Option<String> {
+        self.select_available_pinned(atom, &BTreeMap::new())
+    }
+
+    /// Like [`Self::select_available`], but honors backtracking `pins`: if the
+    /// atom's cp is pinned to a specific cpv, only that cpv may be selected
+    /// (and only when it also matches the atom). This lets the backtracker
+    /// force one shared version across conflicting constraints.
+    fn select_available_pinned(
+        &self,
+        atom: &Atom,
+        pins: &BTreeMap<String, String>,
+    ) -> Option<String> {
         let mut matches = self.available.match_atom(atom);
         matches.retain(|cpv| {
             self.available
@@ -181,6 +210,9 @@ impl<'a> Resolver<'a> {
                 .map(|m| self.params.keyword_visible(&m.keywords))
                 .unwrap_or(false)
         });
+        if let Some(pinned) = pins.get(&atom.cp()) {
+            matches.retain(|cpv| cpv == pinned);
+        }
         // match_atom already returns cpvs sorted ascending, so the best
         // (highest version) visible candidate is the last one.
         matches.pop()
@@ -228,44 +260,128 @@ impl<'a> Resolver<'a> {
         bindings
     }
 
-    /// Resolves a set of target atoms into a merge plan.
+    /// Resolves a set of target atoms into a merge plan, backtracking over slot
+    /// conflicts by pinning a cp to a version satisfying all its constraints.
     pub fn resolve(&self, targets: &[&str]) -> ResolveOutcome {
+        // Parse targets once; an invalid target fails immediately.
+        let parsed: Vec<Atom> = match targets
+            .iter()
+            .map(|t| Atom::parse_with_options(t, DEPENDENCY_ATOM_OPTIONS))
+            .collect::<Result<Vec<_>, _>>()
+        {
+            Ok(atoms) => atoms,
+            Err(err) => {
+                return ResolveOutcome {
+                    mergelist: Vec::new(),
+                    error: Some(ResolveFailure::InvalidDependency(err.to_string())),
+                };
+            }
+        };
+
+        let mut pins: BTreeMap<String, String> = BTreeMap::new();
+        for _ in 0..MAX_BACKTRACK {
+            match self.resolve_pass(&parsed, &pins) {
+                PassResult::Resolved(mergelist) => {
+                    return ResolveOutcome {
+                        mergelist,
+                        error: None,
+                    };
+                }
+                PassResult::Failed(failure) => {
+                    return ResolveOutcome {
+                        mergelist: Vec::new(),
+                        error: Some(failure),
+                    };
+                }
+                PassResult::Conflict(cp) => {
+                    // Compute a version of `cp` satisfying every constraint and
+                    // pin it, then re-resolve. If we can't, the conflict stands.
+                    match self.shared_version(&cp, &parsed) {
+                        Some(cpv) if pins.get(&cp) != Some(&cpv) => {
+                            pins.insert(cp, cpv);
+                        }
+                        _ => {
+                            return ResolveOutcome {
+                                mergelist: Vec::new(),
+                                error: Some(ResolveFailure::Unsatisfied(cp)),
+                            };
+                        }
+                    }
+                }
+            }
+        }
+        ResolveOutcome {
+            mergelist: Vec::new(),
+            error: Some(ResolveFailure::Unsatisfied(
+                "backtrack limit exceeded".to_string(),
+            )),
+        }
+    }
+
+    /// Runs a single resolution pass with the given pins.
+    fn resolve_pass(&self, targets: &[Atom], pins: &BTreeMap<String, String>) -> PassResult {
         let mut builder = GraphBuilder {
             resolver: self,
             edges: BTreeMap::new(),
             selected: BTreeSet::new(),
             blockers: Vec::new(),
             in_progress: Vec::new(),
+            pins: pins.clone(),
+            atoms_by_cp: BTreeMap::new(),
         };
 
-        for target in targets {
-            let atom = match Atom::parse_with_options(target, DEPENDENCY_ATOM_OPTIONS) {
-                Ok(atom) => atom,
-                Err(err) => {
-                    return ResolveOutcome {
-                        mergelist: Vec::new(),
-                        error: Some(ResolveFailure::InvalidDependency(err.to_string())),
-                    };
-                }
-            };
-            if let Err(failure) = builder.expand_atom(&atom, true) {
-                return ResolveOutcome {
-                    mergelist: Vec::new(),
-                    error: Some(failure),
-                };
+        for atom in targets {
+            if let Err(failure) = builder.expand_atom(atom, true) {
+                return PassResult::Failed(failure);
             }
         }
 
-        match builder.finish() {
-            Ok(mergelist) => ResolveOutcome {
-                mergelist,
-                error: None,
-            },
-            Err(failure) => ResolveOutcome {
-                mergelist: Vec::new(),
-                error: Some(failure),
-            },
+        // Detect a slot conflict: a cp whose constraints cannot all be met by
+        // the single version currently selected.
+        if let Some(cp) = builder.first_conflicting_cp() {
+            return PassResult::Conflict(cp);
         }
+
+        match builder.finish() {
+            Ok(mergelist) => PassResult::Resolved(mergelist),
+            Err(failure) => PassResult::Failed(failure),
+        }
+    }
+
+    /// Computes the highest visible version of `cp` that satisfies every
+    /// recorded constraint atom for that cp (from a probe pass), if any.
+    fn shared_version(&self, cp: &str, targets: &[Atom]) -> Option<String> {
+        // Re-run a probe pass to gather all atoms that constrain `cp`.
+        let mut probe = GraphBuilder {
+            resolver: self,
+            edges: BTreeMap::new(),
+            selected: BTreeSet::new(),
+            blockers: Vec::new(),
+            in_progress: Vec::new(),
+            pins: BTreeMap::new(),
+            atoms_by_cp: BTreeMap::new(),
+        };
+        for atom in targets {
+            let _ = probe.expand_atom(atom, true);
+        }
+        let constraints = probe.atoms_by_cp.get(cp)?;
+
+        let mut candidates = self.available.cpv_all();
+        candidates.retain(|cpv| crate::version::split_cpv(cpv).0 == cp);
+        candidates.retain(|cpv| {
+            self.available
+                .metadata(cpv)
+                .map(|m| self.params.keyword_visible(&m.keywords))
+                .unwrap_or(false)
+        });
+        // Keep only versions satisfying every constraint atom.
+        candidates.retain(|cpv| {
+            constraints
+                .iter()
+                .all(|atom| package_matches_atom(self.available, cpv, atom))
+        });
+        // cpv_all is sorted ascending; the best shared version is the highest.
+        candidates.pop()
     }
 }
 
@@ -275,6 +391,14 @@ impl GraphBuilder<'_> {
     /// considered for merge) from a transitive dependency (may be satisfied by
     /// an installed package).
     fn expand_atom(&mut self, atom: &Atom, is_target: bool) -> Result<(), ResolveFailure> {
+        // Record every non-blocker atom by cp for slot-conflict detection.
+        if atom.blocker.is_none() {
+            self.atoms_by_cp
+                .entry(atom.cp())
+                .or_default()
+                .push(atom.clone());
+        }
+
         // A transitive dependency already satisfied by an installed package is
         // not re-merged (emerge's default without --deep/--update/--newuse).
         // Top-level targets are always considered for (re)installation.
@@ -282,7 +406,7 @@ impl GraphBuilder<'_> {
             return Ok(());
         }
 
-        let Some(cpv) = self.resolver.select_available(atom) else {
+        let Some(cpv) = self.resolver.select_available_pinned(atom, &self.pins) else {
             // If an installed package satisfies it, accept that silently.
             if self.resolver.installed_satisfies(atom) {
                 return Ok(());
@@ -312,7 +436,7 @@ impl GraphBuilder<'_> {
                 continue;
             }
             // Record an edge: the dependency package must precede this one.
-            if let Some(dep_cpv) = self.resolver.select_available(&dep_atom) {
+            if let Some(dep_cpv) = self.resolver.select_available_pinned(&dep_atom, &self.pins) {
                 self.edges.entry(cpv.clone()).or_default().insert(dep_cpv);
             }
             self.expand_atom(&dep_atom, false)?;
@@ -542,6 +666,31 @@ impl GraphBuilder<'_> {
             // The rebuild must merge after its (new sub-slot) dependency.
             self.edges.entry(rebuild_cpv).or_default().insert(dep_cpv);
         }
+    }
+
+    /// Returns the first cp with a slot conflict: two or more selected versions
+    /// that occupy the same cp+slot. Such a cp can be re-pinned to a single
+    /// shared version by the backtracker.
+    fn first_conflicting_cp(&self) -> Option<String> {
+        // Group selected cpvs by (cp, slot); a cp+slot with >1 version conflicts.
+        let mut by_cp_slot: BTreeMap<(String, String), BTreeSet<String>> = BTreeMap::new();
+        for cpv in &self.selected {
+            let (cp, _) = crate::version::split_cpv(cpv);
+            let slot = self
+                .resolver
+                .available
+                .metadata(cpv)
+                .and_then(|m| m.slot.clone())
+                .unwrap_or_else(|| "0".to_string());
+            by_cp_slot
+                .entry((cp, slot))
+                .or_default()
+                .insert(cpv.clone());
+        }
+        by_cp_slot
+            .into_iter()
+            .find(|(_, cpvs)| cpvs.len() > 1)
+            .map(|((cp, _), _)| cp)
     }
 
     /// A blocker atom must not match any package selected for merge.
