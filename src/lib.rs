@@ -4,6 +4,7 @@ pub mod config;
 pub mod dbapi;
 pub mod dep;
 pub mod depgraph;
+pub mod executor;
 pub mod manifest;
 pub mod matching;
 pub mod profile;
