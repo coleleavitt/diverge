@@ -42,6 +42,15 @@ pub struct ResolveParams {
     /// When true, propose keyword changes (accept `~arch`) for packages that
     /// are only available unstable, instead of failing (`--autounmask`).
     pub autounmask: bool,
+    /// `--update`: reinstall an installed dependency when a higher visible
+    /// version is available (otherwise installed deps are left as-is).
+    pub update: bool,
+    /// `--deep`: recurse into already-satisfied installed dependencies to
+    /// consider them for updates (otherwise recursion stops at installed deps).
+    pub deep: bool,
+    /// `--newuse`: reinstall an installed package when its enabled USE flags
+    /// differ from the configured USE set.
+    pub newuse: bool,
     /// Dependency variables to follow, in priority order.
     pub dep_keys: Vec<String>,
 }
@@ -54,6 +63,9 @@ impl Default for ResolveParams {
             use_flags: BTreeSet::new(),
             noreplace: false,
             autounmask: false,
+            update: false,
+            deep: false,
+            newuse: false,
             dep_keys: vec![
                 "BDEPEND".to_string(),
                 "DEPEND".to_string(),
@@ -77,6 +89,21 @@ impl ResolveParams {
 
     pub fn with_autounmask(mut self, enabled: bool) -> Self {
         self.autounmask = enabled;
+        self
+    }
+
+    pub fn with_update(mut self, enabled: bool) -> Self {
+        self.update = enabled;
+        self
+    }
+
+    pub fn with_deep(mut self, enabled: bool) -> Self {
+        self.deep = enabled;
+        self
+    }
+
+    pub fn with_newuse(mut self, enabled: bool) -> Self {
+        self.newuse = enabled;
         self
     }
 
@@ -263,6 +290,59 @@ impl<'a> Resolver<'a> {
     /// True when an installed package already satisfies `atom`.
     fn installed_satisfies(&self, atom: &Atom) -> bool {
         !self.installed.match_atom(atom).is_empty()
+    }
+
+    /// Decides whether an installed-satisfied dependency should be reconsidered
+    /// for (re)installation under `--update`/`--newuse`/`--deep`:
+    /// - `--update`: a higher visible available version exists.
+    /// - `--newuse`: the available version's USE differs from the installed one.
+    /// - `--deep`: always recurse (to evaluate the above transitively).
+    fn wants_reinstall(&self, atom: &Atom, pins: &BTreeMap<String, String>) -> bool {
+        if !(self.params.update || self.params.newuse || self.params.deep) {
+            return false;
+        }
+        let Some(available_cpv) = self.select_available_pinned(atom, pins) else {
+            return false;
+        };
+        let installed = self.installed.match_atom(atom);
+
+        if self.params.update {
+            let (_, avail_ver) = crate::version::split_cpv(&available_cpv);
+            let higher = installed.iter().all(|inst| {
+                let (_, inst_ver) = crate::version::split_cpv(inst);
+                match (&avail_ver, inst_ver) {
+                    (Some(a), Some(i)) => {
+                        crate::version::vercmp(a, &i) == std::cmp::Ordering::Greater
+                    }
+                    _ => false,
+                }
+            });
+            if higher && !installed.is_empty() {
+                return true;
+            }
+        }
+
+        if self.params.newuse {
+            let avail_use = self
+                .available
+                .metadata(&available_cpv)
+                .map(|m| m.use_enabled.iter().cloned().collect::<BTreeSet<_>>())
+                .unwrap_or_default();
+            let use_changed = installed.iter().any(|inst| {
+                let inst_use = self
+                    .installed
+                    .metadata(inst)
+                    .map(|m| m.use_enabled.iter().cloned().collect::<BTreeSet<_>>())
+                    .unwrap_or_default();
+                inst_use != avail_use
+            });
+            if use_changed {
+                return true;
+            }
+        }
+
+        // --deep alone recurses but only reinstalls when update/newuse fire.
+        false
     }
 
     /// The sub-slot of an available cpv, if it declares one.
@@ -454,6 +534,79 @@ impl<'a> Resolver<'a> {
         }
     }
 
+    /// Computes the depclean removal list: installed packages not reachable
+    /// from the protected set (`world` atoms + the always-protected `@system`
+    /// set, supplied via `world_atoms`) through RDEPEND/PDEPEND/DEPEND edges.
+    ///
+    /// Mirrors emerge `--depclean`: starting from the packages the world set
+    /// selects, mark every transitively-required installed package as kept;
+    /// everything else is in the clean list (deepest dependents are computed by
+    /// reachability, so order is by cpv).
+    pub fn depclean(&self, world_atoms: &[&str]) -> Vec<String> {
+        let mut keep: BTreeSet<String> = BTreeSet::new();
+
+        // Seed: installed packages matching a world atom.
+        let mut frontier: Vec<String> = Vec::new();
+        for atom_str in world_atoms {
+            let Ok(atom) = Atom::parse_with_options(atom_str, DEPENDENCY_ATOM_OPTIONS) else {
+                continue;
+            };
+            for cpv in self.installed.match_atom(&atom) {
+                if keep.insert(cpv.clone()) {
+                    frontier.push(cpv);
+                }
+            }
+        }
+
+        // Transitively keep everything reachable via dependency edges.
+        while let Some(cpv) = frontier.pop() {
+            for dep_atom in self.installed_runtime_deps(&cpv) {
+                for dep_cpv in self.installed.match_atom(&dep_atom) {
+                    if keep.insert(dep_cpv.clone()) {
+                        frontier.push(dep_cpv);
+                    }
+                }
+            }
+        }
+
+        // The clean list is every installed package not kept.
+        let mut cleanlist: Vec<String> = self
+            .installed
+            .cpv_all()
+            .into_iter()
+            .filter(|cpv| !keep.contains(cpv))
+            .collect();
+        cleanlist.sort_by(|a, b| crate::version::cpv_cmp(a, b));
+        cleanlist
+    }
+
+    /// The runtime/build dependency atoms of an installed cpv, used to compute
+    /// depclean reachability. OR-choices keep all branches' installed matches
+    /// (any installed provider of an `|| ( ... )` is protected).
+    fn installed_runtime_deps(&self, cpv: &str) -> Vec<Atom> {
+        let Some(meta) = self.installed.metadata(cpv) else {
+            return Vec::new();
+        };
+        let use_list: Vec<&str> = self.params.use_flags.iter().map(String::as_str).collect();
+        let options = UseReduceOptions {
+            uselist: &use_list,
+            ..UseReduceOptions::default()
+        };
+        let mut atoms = Vec::new();
+        for key in &self.params.dep_keys {
+            let Some(dep_str) = meta.deps.get(key) else {
+                continue;
+            };
+            if dep_str.trim().is_empty() {
+                continue;
+            }
+            if let Ok(reduced) = use_reduce(dep_str, &options) {
+                collect_all_atoms(&reduced, &mut atoms);
+            }
+        }
+        atoms
+    }
+
     /// Computes the highest visible version of `cp` that satisfies every
     /// recorded constraint atom for that cp (from a probe pass), if any.
     fn shared_version(&self, cp: &str, targets: &[Atom]) -> Option<String> {
@@ -506,9 +659,12 @@ impl GraphBuilder<'_> {
         }
 
         // A transitive dependency already satisfied by an installed package is
-        // not re-merged (emerge's default without --deep/--update/--newuse).
-        // Top-level targets are always considered for (re)installation.
-        if !is_target && self.resolver.installed_satisfies(atom) {
+        // normally not re-merged. With --deep/--update/--newuse we look deeper:
+        // recurse to consider an upgrade or a USE-driven reinstall.
+        if !is_target
+            && self.resolver.installed_satisfies(atom)
+            && !self.resolver.wants_reinstall(atom, &self.pins)
+        {
             return Ok(());
         }
 
@@ -859,6 +1015,25 @@ fn topological_order(
     }
 
     Ok(emitted)
+}
+
+/// Flattens every non-blocker atom in a reduced dependency structure,
+/// including all branches of `|| ( ... )` groups. Used by depclean, where any
+/// installed package satisfying any branch must be protected.
+fn collect_all_atoms(nodes: &[Dep], out: &mut Vec<Atom>) {
+    for node in nodes {
+        match node {
+            Dep::Token(token) if token == "||" => {}
+            Dep::Token(token) => {
+                if let Ok((atom, blocker)) = parse_dep_token(token)
+                    && blocker.is_none()
+                {
+                    out.push(atom);
+                }
+            }
+            Dep::Group(inner) => collect_all_atoms(inner, out),
+        }
+    }
 }
 
 /// Parses a dependency token into an atom plus an optional blocker strength

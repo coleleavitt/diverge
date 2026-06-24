@@ -19,6 +19,8 @@ mod dbapi_parity;
 mod dep_accessors_parity;
 #[path = "portage/dep_reduce_parity.rs"]
 mod dep_reduce_parity;
+#[path = "portage/depclean_parity.rs"]
+mod depclean_parity;
 #[path = "portage/depgraph_parity.rs"]
 mod depgraph_parity;
 #[path = "portage/end_to_end.rs"]

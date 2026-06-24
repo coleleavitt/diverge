@@ -216,8 +216,8 @@ differential test:
 | todo | `research/portage/lib/portage/tests/resolver/test_complete_graph.py` | TBD |
 | todo | `research/portage/lib/portage/tests/resolver/test_complete_if_new_subslot_without_revbump.py` | TBD |
 | todo | `research/portage/lib/portage/tests/resolver/test_cross_dep_priority.py` | TBD |
-| todo | `research/portage/lib/portage/tests/resolver/test_depclean.py` | TBD |
-| todo | `research/portage/lib/portage/tests/resolver/test_depclean_order.py` | TBD |
+| ported-representative | `research/portage/lib/portage/tests/resolver/test_depclean.py` | `tests/portage/depclean_parity.rs` |
+| ported-representative | `research/portage/lib/portage/tests/resolver/test_depclean_order.py` | `tests/portage/depclean_parity.rs` |
 | todo | `research/portage/lib/portage/tests/resolver/test_depclean_slot_unavailable.py` | TBD |
 | todo | `research/portage/lib/portage/tests/resolver/test_depth.py` | TBD |
 | todo | `research/portage/lib/portage/tests/resolver/test_disjunctive_depend_order.py` | TBD |
@@ -280,7 +280,7 @@ differential test:
 | todo | `research/portage/lib/portage/tests/resolver/test_targetroot.py` | TBD |
 | todo | `research/portage/lib/portage/tests/resolver/test_unmerge_order.py` | TBD |
 | todo | `research/portage/lib/portage/tests/resolver/test_unnecessary_slot_upgrade.py` | TBD |
-| todo | `research/portage/lib/portage/tests/resolver/test_update.py` | TBD |
+| ported-representative | `research/portage/lib/portage/tests/resolver/test_update.py` | `tests/portage/depclean_parity.rs` |
 | todo | `research/portage/lib/portage/tests/resolver/test_use_dep_defaults.py` | TBD |
 | todo | `research/portage/lib/portage/tests/resolver/test_useflags.py` | TBD |
 | todo | `research/portage/lib/portage/tests/resolver/test_virtual_cycle.py` | TBD |
