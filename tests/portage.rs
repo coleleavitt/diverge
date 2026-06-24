@@ -3,6 +3,8 @@ mod fs_fixture;
 #[path = "portage/resolver_fixture.rs"]
 mod resolver_fixture;
 
+#[path = "portage/adapters_parity.rs"]
+mod adapters_parity;
 #[path = "portage/atom_parity.rs"]
 mod atom_parity;
 #[path = "portage/autounmask_parity.rs"]

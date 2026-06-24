@@ -150,13 +150,13 @@ differential test:
 | todo | `research/portage/lib/portage/tests/env/config/test_PackageUseFile.py` | TBD |
 | todo | `research/portage/lib/portage/tests/env/config/test_PortageModulesFile.py` | TBD |
 | todo | `research/portage/lib/portage/tests/glsa/test_security_set.py` | TBD |
-| todo | `research/portage/lib/portage/tests/gpkg/test_gpkg_checksum.py` | TBD |
+| ported-representative | `research/portage/lib/portage/tests/gpkg/test_gpkg_checksum.py` | `tests/portage/adapters_parity.rs` |
 | todo | `research/portage/lib/portage/tests/gpkg/test_gpkg_gpg.py` | TBD |
 | todo | `research/portage/lib/portage/tests/gpkg/test_gpkg_gpg_emerge.py` | TBD |
-| todo | `research/portage/lib/portage/tests/gpkg/test_gpkg_metadata_update.py` | TBD |
+| ported-representative | `research/portage/lib/portage/tests/gpkg/test_gpkg_metadata_update.py` | `tests/portage/adapters_parity.rs` |
 | todo | `research/portage/lib/portage/tests/gpkg/test_gpkg_metadata_url.py` | TBD |
 | todo | `research/portage/lib/portage/tests/gpkg/test_gpkg_path.py` | TBD |
-| todo | `research/portage/lib/portage/tests/gpkg/test_gpkg_size.py` | TBD |
+| ported-representative | `research/portage/lib/portage/tests/gpkg/test_gpkg_size.py` | `tests/portage/adapters_parity.rs` |
 | todo | `research/portage/lib/portage/tests/gpkg/test_gpkg_stream.py` | TBD |
 | todo | `research/portage/lib/portage/tests/lafilefixer/test_lafilefixer.py` | TBD |
 | todo | `research/portage/lib/portage/tests/lazyimport/test_lazy_import_portage_baseline.py` | TBD |
@@ -165,7 +165,7 @@ differential test:
 | todo | `research/portage/lib/portage/tests/lint/test_import_modules.py` | TBD |
 | todo | `research/portage/lib/portage/tests/locks/test_asynchronous_lock.py` | TBD |
 | todo | `research/portage/lib/portage/tests/locks/test_lock_nonblock.py` | TBD |
-| todo | `research/portage/lib/portage/tests/news/test_NewsItem.py` | TBD |
+| ported-representative | `research/portage/lib/portage/tests/news/test_NewsItem.py` | `tests/portage/adapters_parity.rs` |
 | todo | `research/portage/lib/portage/tests/process/test_AsyncFunction.py` | TBD |
 | todo | `research/portage/lib/portage/tests/process/test_ForkProcess.py` | TBD |
 | todo | `research/portage/lib/portage/tests/process/test_PipeLogger.py` | TBD |
@@ -294,7 +294,7 @@ differential test:
 | todo | `research/portage/lib/portage/tests/sets/files/test_config_file_set.py` | TBD |
 | todo | `research/portage/lib/portage/tests/sets/files/test_static_file_set.py` | TBD |
 | todo | `research/portage/lib/portage/tests/sets/shell/test_shell.py` | TBD |
-| todo | `research/portage/lib/portage/tests/sync/test_sync_local.py` | TBD |
+| ported-representative | `research/portage/lib/portage/tests/sync/test_sync_local.py` | `tests/portage/adapters_parity.rs` |
 | todo | `research/portage/lib/portage/tests/sync/test_sync_zipfile.py` | TBD |
 | todo | `research/portage/lib/portage/tests/unicode/test_string_format.py` | TBD |
 | ported-representative | `research/portage/lib/portage/tests/update/test_move_ent.py` | `tests/portage/binpkg_sets_parity.rs` |
