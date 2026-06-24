@@ -191,6 +191,43 @@ impl<'a> Resolver<'a> {
         !self.installed.match_atom(atom).is_empty()
     }
 
+    /// The sub-slot of an available cpv, if it declares one.
+    fn available_sub_slot(&self, cpv: &str) -> Option<String> {
+        self.available
+            .metadata(cpv)
+            .and_then(|m| m.sub_slot.clone())
+    }
+
+    /// Selects the best visible available cpv for a bare `category/package`.
+    fn select_available_cp(&self, cp: &str) -> Option<String> {
+        Atom::parse_with_options(cp, DEPENDENCY_ATOM_OPTIONS)
+            .ok()
+            .and_then(|atom| self.select_available(&atom))
+    }
+
+    /// Finds installed packages with a slot-operator (`:slot/sub=`) dependency
+    /// on `dep_cp`, returning each `(installed_cpv, bound_sub_slot)`.
+    ///
+    /// Installed deps record the bound sub-slot literally, e.g.
+    /// `app-misc/A:0/1=`. This scans the installed packages' dependency strings
+    /// for such tokens.
+    fn installed_slot_op_bindings(&self, dep_cp: &str) -> Vec<(String, String)> {
+        let mut bindings = Vec::new();
+        for inst_cpv in self.installed.cpv_all() {
+            let Some(meta) = self.installed.metadata(&inst_cpv) else {
+                continue;
+            };
+            for dep_str in meta.deps.values() {
+                for token in dep_str.split_whitespace() {
+                    if let Some(sub) = slot_op_binding(token, dep_cp) {
+                        bindings.push((inst_cpv.clone(), sub));
+                    }
+                }
+            }
+        }
+        bindings
+    }
+
     /// Resolves a set of target atoms into a merge plan.
     pub fn resolve(&self, targets: &[&str]) -> ResolveOutcome {
         let mut builder = GraphBuilder {
@@ -465,11 +502,46 @@ impl GraphBuilder<'_> {
         })
     }
 
-    /// Finalizes the graph: checks blockers, then topologically orders the
-    /// selected packages so dependencies precede dependents.
-    fn finish(self) -> Result<Vec<String>, ResolveFailure> {
+    /// Finalizes the graph: triggers slot-operator rebuilds, checks blockers,
+    /// then topologically orders the selected packages so dependencies precede
+    /// dependents.
+    fn finish(mut self) -> Result<Vec<String>, ResolveFailure> {
+        self.apply_slot_operator_rebuilds();
         self.check_blockers()?;
         topological_order(&self.selected, &self.edges)
+    }
+
+    /// Pulls in slot-operator rebuilds: an installed package whose recorded
+    /// `:slot/sub=` dependency is being upgraded to a different sub-slot must be
+    /// rebuilt against the new sub-slot (mirrors `test_slot_operator_rebuild`).
+    ///
+    /// For each dependency cpv selected for merge, find installed packages that
+    /// declare a `:=`/`:slot=` dep on its cp bound to a different sub-slot, and
+    /// add the available rebuild of that dependent to the merge graph.
+    fn apply_slot_operator_rebuilds(&mut self) {
+        let mut rebuilds: Vec<(String, String)> = Vec::new();
+        for dep_cpv in self.selected.clone() {
+            let Some(new_sub) = self.resolver.available_sub_slot(&dep_cpv) else {
+                continue;
+            };
+            let (dep_cp, _) = crate::version::split_cpv(&dep_cpv);
+            for (inst_cpv, bound_sub) in self.resolver.installed_slot_op_bindings(&dep_cp) {
+                if bound_sub == new_sub {
+                    continue; // Already built against this sub-slot.
+                }
+                let (inst_cp, _) = crate::version::split_cpv(&inst_cpv);
+                if let Some(rebuild) = self.resolver.select_available_cp(&inst_cp) {
+                    rebuilds.push((rebuild, dep_cpv.clone()));
+                }
+            }
+        }
+        for (rebuild_cpv, dep_cpv) in rebuilds {
+            if self.selected.insert(rebuild_cpv.clone()) {
+                self.edges.entry(rebuild_cpv.clone()).or_default();
+            }
+            // The rebuild must merge after its (new sub-slot) dependency.
+            self.edges.entry(rebuild_cpv).or_default().insert(dep_cpv);
+        }
     }
 
     /// A blocker atom must not match any package selected for merge.
@@ -561,4 +633,18 @@ fn atom_to_request(atom: &Atom) -> String {
     let mut bare = atom.clone();
     bare.blocker = None;
     bare.to_string()
+}
+
+/// If `token` is a slot-operator dependency on `dep_cp` that records a bound
+/// sub-slot (e.g. `cat/pkg:0/1=` for `dep_cp == "cat/pkg"`), returns that
+/// sub-slot. A bare `cat/pkg:=` (no recorded sub-slot) returns `None`.
+fn slot_op_binding(token: &str, dep_cp: &str) -> Option<String> {
+    let bare = token.trim_start_matches('!');
+    let suffix = bare.strip_suffix('=')?;
+    let (cp_slot, sub) = suffix.split_once(':')?;
+    if cp_slot != dep_cp {
+        return None;
+    }
+    // `sub` is `slot` or `slot/sub`; the bound sub-slot is after the `/`.
+    sub.split_once('/').map(|(_, sub)| sub.to_string())
 }

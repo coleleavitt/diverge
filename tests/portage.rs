@@ -33,6 +33,8 @@ mod profile_parity;
 mod repository_parity;
 #[path = "portage/resolver_simple_parity.rs"]
 mod resolver_simple_parity;
+#[path = "portage/slot_operator_parity.rs"]
+mod slot_operator_parity;
 #[path = "portage/util_parity.rs"]
 mod util_parity;
 #[path = "portage/version_parity.rs"]

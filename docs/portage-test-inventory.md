@@ -252,7 +252,7 @@ differential test:
 | todo | `research/portage/lib/portage/tests/resolver/test_required_use.py` | TBD |
 | todo | `research/portage/lib/portage/tests/resolver/test_runtime_cycle_merge_order.py` | TBD |
 | ported-representative | `research/portage/lib/portage/tests/resolver/test_simple.py` | `tests/portage/resolver_simple_parity.rs`, `tests/portage/depgraph_parity.rs` |
-| todo | `research/portage/lib/portage/tests/resolver/test_slot_abi.py` | TBD |
+| ported-representative | `research/portage/lib/portage/tests/resolver/test_slot_abi.py` | `tests/portage/slot_operator_parity.rs` |
 | todo | `research/portage/lib/portage/tests/resolver/test_slot_abi_downgrade.py` | TBD |
 | todo | `research/portage/lib/portage/tests/resolver/test_slot_change_without_revbump.py` | TBD |
 | todo | `research/portage/lib/portage/tests/resolver/test_slot_collisions.py` | TBD |
@@ -268,7 +268,7 @@ differential test:
 | todo | `research/portage/lib/portage/tests/resolver/test_slot_operator_complete_graph.py` | TBD |
 | todo | `research/portage/lib/portage/tests/resolver/test_slot_operator_exclusive_slots.py` | TBD |
 | todo | `research/portage/lib/portage/tests/resolver/test_slot_operator_missed_update.py` | TBD |
-| todo | `research/portage/lib/portage/tests/resolver/test_slot_operator_rebuild.py` | TBD |
+| ported-representative | `research/portage/lib/portage/tests/resolver/test_slot_operator_rebuild.py` | `tests/portage/slot_operator_parity.rs` |
 | todo | `research/portage/lib/portage/tests/resolver/test_slot_operator_required_use.py` | TBD |
 | todo | `research/portage/lib/portage/tests/resolver/test_slot_operator_reverse_deps.py` | TBD |
 | todo | `research/portage/lib/portage/tests/resolver/test_slot_operator_runtime_pkg_mask.py` | TBD |
