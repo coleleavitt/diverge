@@ -33,6 +33,8 @@ mod end_to_end;
 mod executor_parity;
 #[path = "portage/fetch_spawn_parity.rs"]
 mod fetch_spawn_parity;
+#[path = "portage/full_pipeline.rs"]
+mod full_pipeline;
 #[path = "portage/manifest_parity.rs"]
 mod manifest_parity;
 #[path = "portage/matching_parity.rs"]

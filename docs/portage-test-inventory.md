@@ -7,9 +7,10 @@ This inventory records every upstream Python test file currently present so dive
 ## Summary
 
 - Upstream test files inventoried: 239
-- Representative Rust ports currently implemented: 20 parity modules (~30 ported
-  upstream test files) / 118 Rust parity tests, plus the interop differential
-  oracle and an end-to-end integration test exercising all layers together.
+- Representative Rust ports currently implemented: 28 parity modules (~50 ported
+  upstream test files) / 157 Rust parity tests, plus the interop differential
+  oracle, an end-to-end integration test, and a capstone full-pipeline test
+  (resolver advanced features → scheduler → gpkg) exercising all layers together.
 - Current Rust parity test entrypoint: `tests/portage.rs`
 - Coverage command: `cargo llvm-cov --workspace --all-targets --summary-only`
   (currently ~86% line coverage)
