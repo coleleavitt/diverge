@@ -88,6 +88,62 @@ impl Repository {
     }
 }
 
+/// Regenerates the `metadata/md5-cache/<cat>/<pf>` cache for the repository at
+/// `root`, writing one `KEY=value`-per-line entry per package (the keys emerge
+/// reads: EAPI, SLOT, KEYWORDS, IUSE, and the dependency variables). Returns the
+/// number of cache entries written.
+///
+/// This is a from-metadata regen (no eclass sourcing): it mirrors the cache
+/// *format* emerge consumes, populated from each ebuild's directly-declared
+/// `KEY="value"` assignments. Reference: `portage.cache.flat_hash`/`md5-cache`.
+pub fn regen_md5_cache(root: impl AsRef<Path>) -> Result<usize, RepositoryError> {
+    let root = root.as_ref();
+    let repo = Repository::load(root)?;
+    let cache_root = root.join("metadata").join("md5-cache");
+    let mut count = 0usize;
+
+    for (cpv, meta) in repo.db.iter() {
+        let (cp, _) = crate::version::split_cpv(cpv);
+        let Some((category, _)) = cp.split_once('/') else {
+            continue;
+        };
+        // The cache entry filename is the package-version (`pf`).
+        let pf = cpv.split_once('/').map(|x| x.1).unwrap_or(cpv);
+        let entry_dir = cache_root.join(category);
+        std::fs::create_dir_all(&entry_dir)
+            .map_err(|e| RepositoryError::Io(format!("{}: {e}", entry_dir.display())))?;
+        let entry_path = entry_dir.join(pf);
+
+        let mut body = String::new();
+        let slot = match (&meta.slot, &meta.sub_slot) {
+            (Some(s), Some(sub)) => format!("{s}/{sub}"),
+            (Some(s), None) => s.clone(),
+            _ => "0".to_string(),
+        };
+        for key in [
+            "DEPEND",
+            "RDEPEND",
+            "PDEPEND",
+            "BDEPEND",
+            "IDEPEND",
+            "REQUIRED_USE",
+        ] {
+            if let Some(v) = meta.deps.get(key) {
+                body.push_str(&format!("{key}={v}\n"));
+            }
+        }
+        body.push_str(&format!("SLOT={slot}\n"));
+        body.push_str(&format!("EAPI={}\n", meta.eapi.as_deref().unwrap_or("0")));
+        body.push_str(&format!("KEYWORDS={}\n", meta.keywords.join(" ")));
+        body.push_str(&format!("IUSE={}\n", meta.iuse.join(" ")));
+
+        std::fs::write(&entry_path, body)
+            .map_err(|e| RepositoryError::Io(format!("{}: {e}", entry_path.display())))?;
+        count += 1;
+    }
+    Ok(count)
+}
+
 /// Top-level repository directories that are not package categories.
 fn is_reserved_top_dir(name: &str) -> bool {
     matches!(

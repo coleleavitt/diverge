@@ -69,6 +69,19 @@ pub struct Session {
     pub installed: PackageDb,
     /// Stacked profile (system set, package.use/mask, use.force/mask).
     pub profile: Option<StackedProfile>,
+    /// Per-repository configuration parsed from `repos.conf` (location +
+    /// sync settings), in declaration order.
+    pub repos: Vec<RepoConfig>,
+}
+
+/// One repository's configuration from `repos.conf`: its name, on-disk
+/// `location`, and optional sync settings (`sync-type`, `sync-uri`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepoConfig {
+    pub name: String,
+    pub location: PathBuf,
+    pub sync_type: Option<String>,
+    pub sync_uri: Option<String>,
 }
 
 impl Session {
@@ -82,7 +95,8 @@ impl Session {
         let eroot = eroot.as_ref().to_path_buf();
 
         let variables = load_config_variables(&config_root)?;
-        let available = load_repositories(&config_root, &variables)?;
+        let repos = load_repo_configs(&config_root, &variables);
+        let available = load_repositories(&repos)?;
         let installed =
             vardb::load(vardb::vdb_path(&eroot)).map_err(|e| SessionError::Vardb(e.to_string()))?;
         let profile = load_profile(&config_root)?;
@@ -94,6 +108,7 @@ impl Session {
             available,
             installed,
             profile,
+            repos,
         })
     }
 
@@ -263,7 +278,7 @@ impl Session {
     }
 
     /// Dispatches a parsed request to the matching action renderer, returning
-    /// the report text (`--pretend`-style; mutating actions are still preview).
+    /// the report text.
     pub fn dispatch(&self, request: &EmergeRequest) -> String {
         match request.action {
             EmergeAction::Merge => self.pretend(request),
@@ -273,8 +288,103 @@ impl Session {
             EmergeAction::Info => self.info(),
             EmergeAction::Version => version_banner(),
             EmergeAction::Moo => MOO.to_string(),
+            EmergeAction::Sync => self.sync_action(&mut crate::sync::LocalSync),
+            EmergeAction::Regen | EmergeAction::Metadata => self.regen_action(),
             other => format!("Action {other:?} is not yet implemented.\n"),
         }
+    }
+
+    /// Port of `emerge --sync`: syncs each configured repository that has a
+    /// `sync-type`/`sync-uri`, through an injectable [`crate::sync::SyncBackend`]
+    /// so tests run without network. Renders emerge's per-repo banner and
+    /// reports per-repository success/failure.
+    pub fn sync_action(&self, backend: &mut dyn crate::sync::SyncBackend) -> String {
+        use crate::sync::{SyncConfig, SyncType};
+        let mut out = String::new();
+        let mut synced = 0usize;
+        let mut failed = 0usize;
+
+        for repo in &self.repos {
+            // Only repos with a sync source are synced (matches emerge).
+            let Some(uri) = &repo.sync_uri else {
+                continue;
+            };
+            let sync_type = match repo.sync_type.as_deref() {
+                Some("rsync") => SyncType::Rsync,
+                Some("git") => SyncType::Git,
+                Some("webrsync") => SyncType::WebRsync,
+                _ => SyncType::Local,
+            };
+            out.push_str(&format!(
+                ">>> Syncing repository '{}' into '{}'...\n",
+                repo.name,
+                repo.location.display()
+            ));
+            let config = SyncConfig {
+                name: repo.name.clone(),
+                location: repo.location.clone(),
+                uri: uri.clone(),
+                sync_type,
+            };
+            match backend.sync(&config) {
+                Ok(outcome) => {
+                    synced += 1;
+                    if outcome.updated {
+                        out.push_str(&format!(
+                            ">>> Repository '{}' updated ({} file(s) changed).\n",
+                            repo.name,
+                            outcome.changed_files.len()
+                        ));
+                    } else {
+                        out.push_str(&format!(
+                            ">>> Repository '{}' is already up to date.\n",
+                            repo.name
+                        ));
+                    }
+                }
+                Err(err) => {
+                    failed += 1;
+                    out.push_str(&format!("!!! Sync error in '{}': {err}\n", repo.name));
+                }
+            }
+        }
+
+        if synced == 0 && failed == 0 {
+            out.push_str("No repositories with a configured sync source.\n");
+        } else {
+            out.push_str(&format!("\nActions: {synced} synced, {failed} failed.\n"));
+        }
+        out
+    }
+
+    /// Port of `emerge --regen`/`--metadata`: regenerates the md5-cache for each
+    /// configured repository tree, writing `metadata/md5-cache/<cat>/<pf>`
+    /// entries from each ebuild's parsed metadata. Reports the count.
+    pub fn regen_action(&self) -> String {
+        let mut out = String::new();
+        let mut total = 0usize;
+        for repo in &self.repos {
+            if !repo.location.is_dir() {
+                continue;
+            }
+            match crate::repository::regen_md5_cache(&repo.location) {
+                Ok(n) => {
+                    total += n;
+                    out.push_str(&format!(
+                        ">>> Regenerated {n} cache entr{} for '{}'.\n",
+                        if n == 1 { "y" } else { "ies" },
+                        repo.name
+                    ));
+                }
+                Err(err) => {
+                    out.push_str(&format!("!!! Regen error in '{}': {err}\n", repo.name));
+                }
+            }
+        }
+        if total == 0 {
+            out.push_str("No cache entries regenerated.\n");
+        }
+        out
     }
 
     /// Port of `emerge --search`/`-s`: lists available packages whose name
@@ -441,47 +551,27 @@ fn load_config_variables(config_root: &Path) -> Result<HashMap<String, String>, 
     Ok(vars)
 }
 
-/// Reads `etc/portage/repos.conf` (file or directory) for repository locations,
-/// loading each into one combined [`PackageDb`]. Falls back to the conventional
-/// `usr/portage`/`var/db/repos/gentoo` locations when no repos.conf is present.
-fn load_repositories(
-    config_root: &Path,
-    variables: &HashMap<String, String>,
-) -> Result<PackageDb, SessionError> {
-    let mut locations = repo_locations(config_root);
-
-    // Fallback: PORTDIR or conventional tree roots.
-    if locations.is_empty() {
-        if let Some(portdir) = variables.get("PORTDIR") {
-            locations.push(PathBuf::from(portdir));
-        }
-        for candidate in ["var/db/repos/gentoo", "usr/portage"] {
-            let p = config_root.join(candidate);
-            if p.is_dir() {
-                locations.push(p);
-            }
-        }
-    }
-
+/// Loads every configured repository into one combined [`PackageDb`]. A
+/// malformed/foreign tree is skipped rather than aborting the run.
+fn load_repositories(repos: &[RepoConfig]) -> Result<PackageDb, SessionError> {
     let mut combined = PackageDb::new();
-    for location in locations {
-        if !location.is_dir() {
+    for repo in repos {
+        if !repo.location.is_dir() {
             continue;
         }
-        match Repository::load(&location) {
-            Ok(repo) => combined.merge_from(&repo.db),
-            // A malformed/foreign tree is skipped rather than aborting the run.
-            Err(_) => continue,
+        if let Ok(loaded) = Repository::load(&repo.location) {
+            combined.merge_from(&loaded.db);
         }
     }
     Ok(combined)
 }
 
-/// Collects repository `location` paths from `repos.conf` (file or `.d` dir).
-fn repo_locations(config_root: &Path) -> Vec<PathBuf> {
-    let mut out = Vec::new();
+/// Parses `repos.conf` (file or `.d` directory) into per-repo configs, honoring
+/// the INI `[section]` form: each `[name]` block carries `location`,
+/// `sync-type`, and `sync-uri`. Falls back to `PORTDIR`/conventional tree roots
+/// (as an unnamed `gentoo` repo) when no `repos.conf` is present.
+fn load_repo_configs(config_root: &Path, variables: &HashMap<String, String>) -> Vec<RepoConfig> {
     let base = config_root.join("etc/portage/repos.conf");
-
     let mut files: Vec<PathBuf> = Vec::new();
     if base.is_file() {
         files.push(base.clone());
@@ -492,20 +582,77 @@ fn repo_locations(config_root: &Path) -> Vec<PathBuf> {
         files.sort();
     }
 
+    let mut repos: Vec<RepoConfig> = Vec::new();
     for file in files {
         let Ok(content) = std::fs::read_to_string(&file) else {
             continue;
         };
-        for line in content.lines() {
-            let line = line.trim();
-            if let Some(rest) = line.strip_prefix("location")
-                && let Some((_, value)) = rest.split_once('=')
-            {
-                out.push(PathBuf::from(value.trim()));
+        parse_repos_conf(&content, &mut repos);
+    }
+
+    if repos.is_empty() {
+        // Fallback: PORTDIR or the conventional tree roots, as a `gentoo` repo.
+        let mut candidates: Vec<PathBuf> = Vec::new();
+        if let Some(portdir) = variables.get("PORTDIR") {
+            candidates.push(PathBuf::from(portdir));
+        }
+        for rel in ["var/db/repos/gentoo", "usr/portage"] {
+            candidates.push(config_root.join(rel));
+        }
+        for location in candidates {
+            if location.is_dir() {
+                repos.push(RepoConfig {
+                    name: "gentoo".to_string(),
+                    location,
+                    sync_type: None,
+                    sync_uri: None,
+                });
             }
         }
     }
-    out
+    repos
+}
+
+/// Parses INI-style `repos.conf` content, appending each `[name]` section's
+/// config to `repos`. Keys before any section header are ignored.
+fn parse_repos_conf(content: &str, repos: &mut Vec<RepoConfig>) {
+    let mut current: Option<RepoConfig> = None;
+    let push = |cur: &mut Option<RepoConfig>, repos: &mut Vec<RepoConfig>| {
+        if let Some(repo) = cur.take()
+            && !repo.location.as_os_str().is_empty()
+        {
+            repos.push(repo);
+        }
+    };
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+        if let Some(name) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+            push(&mut current, repos);
+            current = Some(RepoConfig {
+                name: name.trim().to_string(),
+                location: PathBuf::new(),
+                sync_type: None,
+                sync_uri: None,
+            });
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let (key, value) = (key.trim(), value.trim().to_string());
+        if let Some(repo) = current.as_mut() {
+            match key {
+                "location" => repo.location = PathBuf::from(value),
+                "sync-type" => repo.sync_type = Some(value),
+                "sync-uri" => repo.sync_uri = Some(value),
+                _ => {}
+            }
+        }
+    }
+    push(&mut current, repos);
 }
 
 /// Loads the active profile from the `etc/portage/make.profile` symlink chain.

@@ -226,3 +226,108 @@ fn depclean_report_lists_unreferenced_installed() {
         "depclean: {report}"
     );
 }
+
+#[test]
+fn sync_action_copies_repo_from_local_source() {
+    // A repos.conf with sync-type=rsync + a local sync-uri; LocalSync copies it.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    // The sync *source* tree.
+    let src = root.join("source/gentoo");
+    write(&src.join("profiles/repo_name"), "gentoo\n");
+    write(
+        &src.join("app-misc/hello/hello-1.ebuild"),
+        &ebuild(&[("EAPI", "7"), ("SLOT", "0"), ("KEYWORDS", "amd64")]),
+    );
+    // The empty destination + repos.conf pointing at the source.
+    let dest = root.join("var/db/repos/gentoo");
+    write(&root.join("etc/portage/make.conf"), "ARCH=\"amd64\"\n");
+    write(
+        &root.join("etc/portage/repos.conf"),
+        &format!(
+            "[gentoo]\nlocation = {}\nsync-type = rsync\nsync-uri = {}\n",
+            dest.display(),
+            src.display()
+        ),
+    );
+
+    let session = Session::load(root, root).expect("session");
+    // Repo config parsed with sync settings.
+    assert_eq!(session.repos.len(), 1);
+    assert_eq!(session.repos[0].sync_type.as_deref(), Some("rsync"));
+    assert_eq!(
+        session.repos[0].sync_uri.as_deref(),
+        Some(src.to_str().unwrap())
+    );
+
+    let mut backend = diverge::sync::LocalSync;
+    let report = session.sync_action(&mut backend);
+    assert!(
+        report.contains(">>> Syncing repository 'gentoo'"),
+        "report: {report}"
+    );
+    assert!(report.contains("1 synced, 0 failed"), "report: {report}");
+    // The destination tree now has the ebuild.
+    assert!(dest.join("app-misc/hello/hello-1.ebuild").exists());
+}
+
+#[test]
+fn sync_action_reports_failure_for_missing_source() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    write(&root.join("etc/portage/make.conf"), "ARCH=\"amd64\"\n");
+    write(
+        &root.join("etc/portage/repos.conf"),
+        &format!(
+            "[gentoo]\nlocation = {}\nsync-type = rsync\nsync-uri = {}\n",
+            root.join("dest").display(),
+            root.join("does-not-exist").display()
+        ),
+    );
+    let session = Session::load(root, root).expect("session");
+    let mut backend = diverge::sync::LocalSync;
+    let report = session.sync_action(&mut backend);
+    assert!(report.contains("!!! Sync error"), "report: {report}");
+    assert!(report.contains("0 synced, 1 failed"), "report: {report}");
+}
+
+#[test]
+fn regen_action_writes_md5_cache() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    let repo = root.join("var/db/repos/gentoo");
+    write(&repo.join("profiles/repo_name"), "gentoo\n");
+    write(
+        &repo.join("app-misc/hello/hello-1.ebuild"),
+        &ebuild(&[
+            ("EAPI", "7"),
+            ("SLOT", "0/2"),
+            ("KEYWORDS", "amd64 ~x86"),
+            ("IUSE", "+foo bar"),
+            ("DEPEND", "dev-libs/b"),
+        ]),
+    );
+    write(&root.join("etc/portage/make.conf"), "ARCH=\"amd64\"\n");
+    write(
+        &root.join("etc/portage/repos.conf"),
+        &format!("[gentoo]\nlocation = {}\n", repo.display()),
+    );
+
+    let session = Session::load(root, root).expect("session");
+    let report = session.regen_action();
+    assert!(
+        report.contains("Regenerated 1 cache entry"),
+        "report: {report}"
+    );
+
+    // The md5-cache entry exists with the expected KEY=value lines.
+    let entry = repo.join("metadata/md5-cache/app-misc/hello-1");
+    assert!(entry.exists(), "cache entry written");
+    let body = std::fs::read_to_string(&entry).unwrap();
+    assert!(body.contains("SLOT=0/2"), "{body}");
+    assert!(body.contains("EAPI=7"), "{body}");
+    assert!(body.contains("KEYWORDS=amd64 ~x86"), "{body}");
+    assert!(body.contains("DEPEND=dev-libs/b"), "{body}");
+    // IUSE default markers are stripped by the loader.
+    assert!(body.contains("IUSE=foo bar"), "{body}");
+}
