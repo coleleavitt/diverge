@@ -608,13 +608,18 @@ impl Session {
             return Err(SessionError::Config(format!("resolution failed: {err}")));
         }
 
+        // The per-package build dir layout (`PORTAGE_BUILDDIR`), under which the
+        // build's `src_install` writes the install image (`D` = <build>/image).
+        let build_root = self.eroot.join("var/tmp/portage");
+        let build_dirs = |cpv: &str| BuildDirs::new(build_root.join(cpv), build_root.join(cpv));
+
         // Build phases for every package via the scheduler.
         let use_flags = self.use_flags();
         struct Plan {
-            cpvs: BTreeSet<String>,
             use_flags: Vec<String>,
             available: PackageDb,
             root: PathBuf,
+            build_root: PathBuf,
         }
         impl crate::executor::scheduler::PackagePlan for Plan {
             fn phase_context(&self, cpv: &str) -> PhaseContext {
@@ -623,7 +628,7 @@ impl Session {
                     .metadata(cpv)
                     .and_then(|m| m.eapi.clone())
                     .unwrap_or_else(|| "0".to_string());
-                let build = self.root.join("var/tmp/portage").join(cpv);
+                let build = self.build_root.join(cpv);
                 PhaseContext {
                     ebuild: build.join("ebuild"),
                     cpv: cpv.to_string(),
@@ -635,15 +640,15 @@ impl Session {
             }
         }
         let plan = Plan {
-            cpvs: outcome.mergelist.iter().cloned().collect(),
             use_flags,
             available: self.available.clone(),
             root: self.eroot.clone(),
+            build_root: build_root.clone(),
         };
 
+        // Build (run setup..install phases) for each package, then merge.
         let mut scheduler = Scheduler::new(RunMode::BuildOnly, spawner);
         let schedule = scheduler.run(&outcome.mergelist, &plan);
-        let _ = &plan.cpvs;
 
         let mut report = MergeReport {
             merged: Vec::new(),
@@ -651,17 +656,22 @@ impl Session {
             remaining: schedule.remaining.clone(),
         };
 
-        // Merge each successfully-built package's image into the root.
+        // Merge each successfully-built package's image into the root. The
+        // install image defaults to the build's `D` (image dir) — populated by
+        // a real `src_install` — and `image_for` can override it (e.g. tests or
+        // binary-package extraction).
         let oneshot = request.options.oneshot;
         for record in &schedule.records {
             if !record.success {
                 break;
             }
-            let Some(image) = image_for(&record.cpv) else {
-                // No image available (e.g. nothing was actually built): skip
-                // the filesystem merge but keep the build record.
+            let image =
+                image_for(&record.cpv).unwrap_or_else(|| build_dirs(&record.cpv).image_dir.clone());
+            if !image.is_dir() {
+                // Nothing was actually produced (no real build/image): record
+                // the build but skip the filesystem merge.
                 continue;
-            };
+            }
             self.install_image(&record.cpv, &image, oneshot)?;
             report.merged.push(record.cpv.clone());
         }

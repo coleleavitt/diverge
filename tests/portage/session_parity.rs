@@ -666,3 +666,59 @@ fn check_news_lists_relevant_unread_items() {
     assert!(unread.contains(&item.to_string()));
     assert!(!unread.contains(&item2.to_string()));
 }
+
+#[cfg(unix)]
+#[test]
+fn merge_action_builds_real_image_from_ebuild_sh() {
+    use std::os::unix::fs::PermissionsExt;
+
+    use diverge::executor::CommandSpawner;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    let repo = root.join("var/db/repos/gentoo");
+    write(&repo.join("profiles/repo_name"), "gentoo\n");
+    write(
+        &repo.join("app-misc/hello/hello-1.ebuild"),
+        &ebuild(&[("EAPI", "7"), ("SLOT", "0"), ("KEYWORDS", "amd64")]),
+    );
+    write(
+        &root.join("etc/portage/make.conf"),
+        "ARCH=\"amd64\"\nACCEPT_KEYWORDS=\"amd64\"\n",
+    );
+    write(
+        &root.join("etc/portage/repos.conf"),
+        &format!("[gentoo]\nlocation = {}\n", repo.display()),
+    );
+
+    // A stub ebuild.sh: on the `src_install` phase, populate $D (the image).
+    let script = root.join("ebuild.sh");
+    write(
+        &script,
+        "#!/bin/sh\nif [ \"$1\" = \"src_install\" ]; then\n  mkdir -p \"$D/usr/bin\"\n  echo hi > \"$D/usr/bin/hello\"\nfi\nexit 0\n",
+    );
+    let mut perm = std::fs::metadata(&script).unwrap().permissions();
+    perm.set_mode(0o755);
+    std::fs::set_permissions(&script, perm).unwrap();
+
+    let session = Session::load(root, root).expect("session");
+    let request = EmergeRequest::parse(["app-misc/hello"]).unwrap();
+    // Real spawner runs the stub ebuild.sh for each phase; no image_for override.
+    let mut spawner = CommandSpawner::new(&script);
+    let report = session
+        .merge_action(&request, &mut spawner, |_| None)
+        .expect("merge");
+
+    // The image produced by src_install ($D) was merged into ROOT.
+    assert_eq!(report.merged, vec!["app-misc/hello-1"]);
+    assert_eq!(
+        std::fs::read_to_string(root.join("usr/bin/hello")).unwrap(),
+        "hi\n"
+    );
+    assert!(root.join("var/db/pkg/app-misc/hello-1/CONTENTS").exists());
+    assert!(
+        session
+            .world_atoms()
+            .contains(&"app-misc/hello".to_string())
+    );
+}
