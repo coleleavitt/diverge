@@ -110,3 +110,43 @@ fn missing_parent_is_rejected() {
     let err = ProfileStack::resolve(&leaf).expect_err("missing parent must error");
     assert!(format!("{err}").contains("not found"), "got: {err}");
 }
+
+#[test]
+fn symlinked_profile_resolves_parents_from_target() {
+    // Regression: make.profile is a symlink; its `parent` entries are relative
+    // to the link TARGET, not the link path. (Reproduces the host crash where
+    // parents resolved against /etc/portage/make.profile.)
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    // Real profile tree: repo/profiles/{base, default}.
+    write(
+        &root.join("repo/profiles/base/make.defaults"),
+        "ARCH=\"amd64\"\n",
+    );
+    write(&root.join("repo/profiles/default/parent"), "../base\n");
+    write(
+        &root.join("repo/profiles/default/make.defaults"),
+        "USE=\"x\"\n",
+    );
+    // The symlink an admin would have at /etc/portage/make.profile.
+    let link = root.join("make.profile");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(root.join("repo/profiles/default"), &link)
+        .expect("symlink make.profile");
+
+    let stack = ProfileStack::resolve(&link).expect("resolve via symlink");
+    // base (the parent, resolved relative to the link target) is present.
+    assert!(
+        stack
+            .profiles
+            .iter()
+            .any(|p| p.file_name().unwrap() == "base"),
+        "parent resolved from target: {:?}",
+        stack.profiles
+    );
+    let prof = StackedProfile::from_dir(&link).expect("stack via symlink");
+    assert_eq!(
+        prof.variables.get("ARCH").map(String::as_str),
+        Some("amd64")
+    );
+}

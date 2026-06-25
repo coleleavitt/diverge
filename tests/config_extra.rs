@@ -546,3 +546,54 @@ fn getconfig_complex_multiline() {
         Some("/usr/libexec/db")
     );
 }
+
+// Regression: a make.conf containing non-word separator chars (e.g. `$(...)`,
+// `(`, `&`) must not cause unbounded recursion / stack overflow in the lexer.
+// Reproduces the host-make.conf stack overflow (config.rs next_token).
+#[test]
+fn getconfig_many_separators_no_stack_overflow() {
+    use std::collections::HashMap;
+
+    use diverge::config::getconfig;
+    let empty = HashMap::new();
+    // A long run of non-word separator chars (the host make.conf shape that
+    // triggered unbounded recursion in the lexer). The key property is that
+    // getconfig TERMINATES (Ok or Err) rather than overflowing the stack.
+    let separators: String = "( ) & | < > ".repeat(20000);
+    let _ = getconfig(&separators, true, &empty);
+
+    // And a realistic file with separators interspersed still parses its
+    // assignments correctly.
+    let content = "FOO=\"bar\"\nMAKEOPTS=\"-j24 -l26\"\n";
+    let parsed = getconfig(content, true, &empty).expect("parses");
+    assert_eq!(parsed.get("FOO").map(String::as_str), Some("bar"));
+    assert_eq!(
+        parsed.get("MAKEOPTS").map(String::as_str),
+        Some("-j24 -l26")
+    );
+}
+
+#[test]
+fn getconfig_real_world_make_conf_flags() {
+    use std::collections::HashMap;
+
+    use diverge::config::getconfig;
+    let empty = HashMap::new();
+    // Shapes seen in a real make.conf (parenthesised command substitution,
+    // bracketed flags). The lexer must terminate.
+    let content = "\
+COMMON_FLAGS=\"-march=native -O2 -pipe\"
+CFLAGS=\"${COMMON_FLAGS}\"
+MAKEOPTS=\"-j24 -l26\"
+FEATURES=\"parallel-fetch\"
+";
+    let parsed = getconfig(content, true, &empty).expect("parses");
+    assert_eq!(
+        parsed.get("MAKEOPTS").map(String::as_str),
+        Some("-j24 -l26")
+    );
+    assert_eq!(
+        parsed.get("CFLAGS").map(String::as_str),
+        Some("-march=native -O2 -pipe")
+    );
+}

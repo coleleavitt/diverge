@@ -240,67 +240,75 @@ impl ShlexLexer {
     /// `shlex.get_token()` for the configured lexer. Returns `Err` on an
     /// unterminated quote (upstream raises `ValueError` -> `ParseError`).
     fn next_token(&mut self) -> Result<Option<String>, ParseError> {
-        // Skip whitespace and full-line/inline comments.
+        // Iterative (not recursive) so a long run of separators cannot overflow
+        // the stack — every iteration makes forward progress on `self.pos`.
         loop {
-            while self.pos < self.chars.len() && Self::is_whitespace(self.chars[self.pos]) {
-                self.pos += 1;
-            }
-            if self.pos < self.chars.len() && self.chars[self.pos] == '#' {
-                while self.pos < self.chars.len() && self.chars[self.pos] != '\n' {
+            // Skip whitespace and full-line/inline comments.
+            loop {
+                while self.pos < self.chars.len() && Self::is_whitespace(self.chars[self.pos]) {
                     self.pos += 1;
                 }
-                continue;
+                if self.pos < self.chars.len() && self.chars[self.pos] == '#' {
+                    while self.pos < self.chars.len() && self.chars[self.pos] != '\n' {
+                        self.pos += 1;
+                    }
+                    continue;
+                }
+                break;
             }
-            break;
-        }
 
-        if self.pos >= self.chars.len() {
-            return Ok(None);
-        }
+            if self.pos >= self.chars.len() {
+                return Ok(None);
+            }
 
-        // The `=` separator is its own token (it is not a wordchar).
-        if self.chars[self.pos] == '=' {
+            // The `=` separator is its own token (it is not a wordchar).
+            if self.chars[self.pos] == '=' {
+                self.pos += 1;
+                return Ok(Some("=".to_string()));
+            }
+
+            let mut token = String::new();
+            let mut produced = false;
+
+            while self.pos < self.chars.len() {
+                let c = self.chars[self.pos];
+                if c == '\'' || c == '"' {
+                    produced = true;
+                    self.pos += 1;
+                    self.read_quote(c, &mut token)?;
+                } else if c == '\\' {
+                    // POSIX shlex escape: backslash removes itself and the next
+                    // character is taken literally — including a newline, which
+                    // becomes a literal newline in the token (it is NOT dropped).
+                    produced = true;
+                    self.pos += 1;
+                    if let Some(next) = self.current() {
+                        token.push(next);
+                        self.pos += 1;
+                    }
+                } else if c == '#' {
+                    // A comment terminates the current token.
+                    break;
+                } else if is_shlex_wordchar(c) {
+                    produced = true;
+                    token.push(c);
+                    self.pos += 1;
+                } else {
+                    // A non-word separator (e.g. `(`, `)`, `&`, `|`, `<`, `>`):
+                    // end of this token.
+                    break;
+                }
+            }
+
+            if produced {
+                return Ok(Some(token));
+            }
+
+            // Landed on a single non-word separator char that the inner loop
+            // did not consume. Consume it (guaranteeing progress) and continue
+            // scanning for the next real token — mirroring the previous
+            // recurse-and-skip intent without unbounded recursion.
             self.pos += 1;
-            return Ok(Some("=".to_string()));
-        }
-
-        let mut token = String::new();
-        let mut produced = false;
-
-        while self.pos < self.chars.len() {
-            let c = self.chars[self.pos];
-            if c == '\'' || c == '"' {
-                produced = true;
-                self.pos += 1;
-                self.read_quote(c, &mut token)?;
-            } else if c == '\\' {
-                // POSIX shlex escape: backslash removes itself and the next
-                // character is taken literally — including a newline, which
-                // becomes a literal newline in the token (it is NOT dropped).
-                produced = true;
-                self.pos += 1;
-                if let Some(next) = self.current() {
-                    token.push(next);
-                    self.pos += 1;
-                }
-            } else if c == '#' {
-                // A comment terminates the current token.
-                break;
-            } else if is_shlex_wordchar(c) {
-                produced = true;
-                token.push(c);
-                self.pos += 1;
-            } else {
-                // Whitespace or separator (`=`): end of this token.
-                break;
-            }
-        }
-
-        if produced {
-            Ok(Some(token))
-        } else {
-            // Landed on a separator such as `=` after skipping; recurse.
-            self.next_token()
         }
     }
 

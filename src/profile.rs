@@ -102,6 +102,8 @@ fn add_profile(
     if !current.is_dir() {
         return Err(ProfileError::MissingProfile(current.to_path_buf()));
     }
+    // Resolve the real directory: `make.profile` is typically a symlink, and
+    // its `parent` entries are relative to the link's target, not the link.
     let canonical = current
         .canonicalize()
         .map_err(|err| ProfileError::Io(format!("{}: {err}", current.display())))?;
@@ -109,16 +111,16 @@ fn add_profile(
         // Already in the stack via another path; avoid cycles/duplicates.
         return Ok(());
     }
-    visited.push(canonical);
+    visited.push(canonical.clone());
 
-    let parents_file = current.join("parent");
+    let parents_file = canonical.join("parent");
     if let Some(text) = read_optional(&parents_file)? {
         let parents = grabfile(&text);
         if parents.is_empty() {
             return Err(ProfileError::EmptyParent(parents_file));
         }
         for parent in parents {
-            let resolved = resolve_parent(current, &parent);
+            let resolved = resolve_parent(&canonical, &parent);
             if !resolved.is_dir() {
                 return Err(ProfileError::ParentNotFound {
                     parent,
@@ -129,7 +131,7 @@ fn add_profile(
         }
     }
 
-    profiles.push(current.to_path_buf());
+    profiles.push(canonical);
     Ok(())
 }
 
