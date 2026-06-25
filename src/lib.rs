@@ -66,6 +66,6 @@ where
     let eroot = std::env::var_os("ROOT").map_or_else(|| PathBuf::from("/"), PathBuf::from);
 
     let session = session::Session::load(&config_root, &eroot).map_err(RunError::Session)?;
-    print!("{}", session.pretend(&request));
+    print!("{}", session.dispatch(&request));
     Ok(())
 }

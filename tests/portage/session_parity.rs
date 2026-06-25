@@ -162,3 +162,67 @@ fn session_is_isolated_to_its_root() {
     assert_eq!(session.eroot, dir.path());
     assert_eq!(session.config_root, dir.path());
 }
+
+#[test]
+fn search_action_lists_matching_packages() {
+    let dir = fixture_root();
+    let session = Session::load(dir.path(), dir.path()).expect("session");
+    let report = session.search(&["nano".to_string()]);
+    assert!(report.contains("app-editors/nano"), "search: {report}");
+    assert!(
+        report.contains("Latest version available"),
+        "search: {report}"
+    );
+    // A non-matching term yields no packages.
+    let empty = session.search(&["zzznotreal".to_string()]);
+    assert!(empty.contains("No packages found"), "empty search: {empty}");
+}
+
+#[test]
+fn dispatch_routes_each_action() {
+    let dir = fixture_root();
+    let session = Session::load(dir.path(), dir.path()).expect("session");
+
+    let search = EmergeRequest::parse(["-s", "nano"]).unwrap();
+    assert!(session.dispatch(&search).contains("app-editors/nano"));
+
+    let version = EmergeRequest::parse(["--version"]).unwrap();
+    assert!(session.dispatch(&version).contains("diverge"));
+
+    let moo = EmergeRequest::parse(["--moo"]).unwrap();
+    assert!(session.dispatch(&moo).contains("mooed"));
+
+    let list_sets = EmergeRequest::parse(["--list-sets"]).unwrap();
+    let sets = session.dispatch(&list_sets);
+    assert!(sets.contains("world") && sets.contains("system"));
+
+    let info = EmergeRequest::parse(["--info"]).unwrap();
+    let info_out = session.dispatch(&info);
+    assert!(info_out.contains("ARCH=amd64"), "info: {info_out}");
+}
+
+#[test]
+fn depclean_report_lists_unreferenced_installed() {
+    let dir = fixture_root();
+    // Install an extra package not in world -> depclean should list it.
+    let vdb = dir.path().join("var/db/pkg/app-misc/orphan-1");
+    write(&vdb.join("SLOT"), "0\n");
+    write(&vdb.join("EAPI"), "7\n");
+    // ncurses is in the world via the fixture? No — world is empty here, so both
+    // installed packages are candidates. Seed world with ncurses to protect it.
+    write(
+        &dir.path().join("var/lib/portage/world"),
+        "sys-libs/ncurses\n",
+    );
+
+    let session = Session::load(dir.path(), dir.path()).expect("session");
+    let request = EmergeRequest::parse(["--depclean"]).unwrap();
+    let report = session.depclean_report(&request);
+    // orphan is not protected -> appears in the unmerge list.
+    assert!(report.contains("app-misc/orphan-1"), "depclean: {report}");
+    // ncurses is protected by world -> not listed.
+    assert!(
+        !report.contains("sys-libs/ncurses-6.4"),
+        "depclean: {report}"
+    );
+}

@@ -15,7 +15,7 @@
 //! - `research/portage/lib/portage/package/ebuild/config.py`
 //! - `research/portage/lib/portage/repository/config.py` (repos.conf)
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fmt;
 use std::path::{Path, PathBuf};
 
@@ -255,7 +255,141 @@ impl Session {
             .map_err(|e| SessionError::Vardb(e.to_string()))?;
         Ok(())
     }
+
+    /// Dispatches a parsed request to the matching action renderer, returning
+    /// the report text (`--pretend`-style; mutating actions are still preview).
+    pub fn dispatch(&self, request: &EmergeRequest) -> String {
+        match request.action {
+            EmergeAction::Merge => self.pretend(request),
+            EmergeAction::Search => self.search(&request.raw_targets),
+            EmergeAction::Depclean => self.depclean_report(request),
+            EmergeAction::ListSets => self.list_sets(),
+            EmergeAction::Info => self.info(),
+            EmergeAction::Version => version_banner(),
+            EmergeAction::Moo => MOO.to_string(),
+            other => format!("Action {other:?} is not yet implemented.\n"),
+        }
+    }
+
+    /// Port of `emerge --search`/`-s`: lists available packages whose name
+    /// contains any search term (case-insensitive substring on the cp).
+    pub fn search(&self, terms: &[String]) -> String {
+        let mut seen_cps: BTreeSet<String> = BTreeSet::new();
+        let mut out = String::new();
+        for (cpv, _meta) in self.available.iter() {
+            let cp = crate::version::split_cpv(cpv).0;
+            if !seen_cps.insert(cp.clone()) {
+                continue;
+            }
+            let matches = terms.is_empty()
+                || terms
+                    .iter()
+                    .any(|t| cp.to_lowercase().contains(&t.to_lowercase()));
+            if matches {
+                let installed = !self.installed.match_str(&cp).unwrap_or_default().is_empty();
+                let latest = self
+                    .available
+                    .match_str(&cp)
+                    .ok()
+                    .and_then(|v| v.last().cloned())
+                    .unwrap_or_else(|| cp.clone());
+                out.push_str(&format!(
+                    "*  {cp}\n      Latest version available: {}\n      Installed: {}\n",
+                    crate::version::split_cpv(&latest).1.unwrap_or_default(),
+                    if installed { "yes" } else { "no" }
+                ));
+            }
+        }
+        if out.is_empty() {
+            out.push_str("No packages found.\n");
+        }
+        out
+    }
+
+    /// Computes the depclean removal list from the world+system protected set
+    /// and renders it (preview only — does not unmerge).
+    pub fn depclean_report(&self, request: &EmergeRequest) -> String {
+        let mut protected: Vec<String> = self.world_atoms();
+        if let Some(profile) = &self.profile {
+            protected.extend(profile.system_set.clone());
+        }
+        for set in &request.sets {
+            if set == "world" || set == "selected" {
+                protected.extend(self.world_atoms());
+            }
+        }
+        let protected_refs: Vec<&str> = protected.iter().map(String::as_str).collect();
+        let resolver = Resolver::new(&self.available, &self.installed, ResolveParams::default());
+        let cleanlist = resolver.depclean(&protected_refs);
+
+        let mut out = String::from("\nThese are the packages that would be unmerged:\n\n");
+        for cpv in &cleanlist {
+            out.push_str(&format!(" {cpv}\n"));
+        }
+        out.push_str(&format!("\nTotal: {} package(s)\n", cleanlist.len()));
+        out
+    }
+
+    /// The atoms currently in the world file (`@selected`).
+    pub fn world_atoms(&self) -> Vec<String> {
+        let content = std::fs::read_to_string(self.world_path()).unwrap_or_default();
+        crate::sets::WorldFile::parse(&content).atoms().to_vec()
+    }
+
+    /// Port of `emerge --list-sets`: lists the known package set names.
+    pub fn list_sets(&self) -> String {
+        let mut sets = vec!["selected", "system", "world"];
+        sets.sort_unstable();
+        let mut out = String::new();
+        for s in sets {
+            out.push_str(&format!("{s}\n"));
+        }
+        out
+    }
+
+    /// Port of a minimal `emerge --info`: key configuration variables.
+    pub fn info(&self) -> String {
+        let mut out = String::new();
+        out.push_str(&format!("ARCH={}\n", self.arch()));
+        out.push_str(&format!(
+            "ACCEPT_KEYWORDS={}\n",
+            self.accept_keywords().join(" ")
+        ));
+        out.push_str(&format!("USE={}\n", self.use_flags().join(" ")));
+        out.push_str(&format!(
+            "CONFIG_ROOT={}\nROOT={}\n",
+            self.config_root.display(),
+            self.eroot.display()
+        ));
+        out.push_str(&format!(
+            "Available packages: {}\nInstalled packages: {}\n",
+            self.available.len(),
+            self.installed.len()
+        ));
+        out
+    }
 }
+
+/// The `emerge --version` banner.
+fn version_banner() -> String {
+    format!(
+        "diverge {} (emerge-compatible)\n",
+        env!("CARGO_PKG_VERSION")
+    )
+}
+
+/// The `emerge --moo` easter egg.
+const MOO: &str = concat!(
+    "\n",
+    "  Gentoo Linux; Bug #1\n",
+    "         (__)\n",
+    "         (oo)\n",
+    "   /------\\/\n",
+    "  / |    ||\n",
+    " *  /\\---/\\\n",
+    "    ~~   ~~\n",
+    "...\"Have you mooed today?\"...\n"
+);
 
 /// Loads make.globals + make.conf with profile-aware variable expansion.
 fn load_config_variables(config_root: &Path) -> Result<HashMap<String, String>, SessionError> {
@@ -382,15 +516,8 @@ fn load_profile(config_root: &Path) -> Result<Option<StackedProfile>, SessionErr
 }
 
 /// Renders the resolution outcome as an emerge-style plan report.
-fn render_plan(request: &EmergeRequest, outcome: &ResolveOutcome, session: &Session) -> String {
+fn render_plan(_request: &EmergeRequest, outcome: &ResolveOutcome, session: &Session) -> String {
     let mut out = String::new();
-    if request.action != EmergeAction::Merge {
-        out.push_str(&format!(
-            "Action {:?} is not yet wired end-to-end.\n",
-            request.action
-        ));
-        return out;
-    }
 
     // A hard failure (not an autounmask suggestion) aborts the plan render.
     if let Some(err) = &outcome.error
