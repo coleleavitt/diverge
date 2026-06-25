@@ -29,6 +29,10 @@ pub enum Phase {
     SrcInstall,
     PkgPreinst,
     PkgPostinst,
+    /// The standalone `pkg_config` phase, run by `emerge --config`.
+    PkgConfig,
+    /// The standalone `pkg_info` phase.
+    PkgInfo,
 }
 
 impl Phase {
@@ -44,6 +48,8 @@ impl Phase {
             Self::SrcInstall => "src_install",
             Self::PkgPreinst => "pkg_preinst",
             Self::PkgPostinst => "pkg_postinst",
+            Self::PkgConfig => "pkg_config",
+            Self::PkgInfo => "pkg_info",
         }
     }
 

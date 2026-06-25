@@ -82,8 +82,8 @@ fn session_unimplemented_action_message() {
         "ARCH=\"amd64\"\n",
     );
     let s = Session::load(dir.path(), dir.path()).unwrap();
-    // --sync is a known action but not yet implemented in dispatch (line 276).
-    let req = EmergeRequest::parse(["--sync"]).unwrap();
+    // --prune is a known action still routed to the not-yet-implemented arm.
+    let req = EmergeRequest::parse(["--prune", "dev-libs/A"]).unwrap();
     let out = s.dispatch(&req);
     assert!(out.contains("not yet implemented"), "out: {out}");
 }

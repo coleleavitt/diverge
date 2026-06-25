@@ -331,3 +331,54 @@ fn regen_action_writes_md5_cache() {
     // IUSE default markers are stripped by the loader.
     assert!(body.contains("IUSE=foo bar"), "{body}");
 }
+
+#[test]
+fn config_action_runs_pkg_config_on_installed() {
+    use std::collections::BTreeMap;
+
+    use diverge::executor::phase::{Phase, PhaseOutcome, PhaseSpawner};
+
+    // A fake spawner recording the phases + cpv (via PF env) it was asked to run.
+    struct Recorder {
+        ran: Vec<(String, Phase)>,
+    }
+    impl PhaseSpawner for Recorder {
+        fn run_phase(&mut self, phase: Phase, env: &BTreeMap<String, String>) -> PhaseOutcome {
+            self.ran
+                .push((env.get("PF").cloned().unwrap_or_default(), phase));
+            PhaseOutcome {
+                phase,
+                success: true,
+                message: None,
+            }
+        }
+    }
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    write(&root.join("etc/portage/make.conf"), "ARCH=\"amd64\"\n");
+    // An installed package in the vardb.
+    let vdb = root.join("var/db/pkg/app-misc/tool-1");
+    write(&vdb.join("SLOT"), "0\n");
+    write(&vdb.join("EAPI"), "7\n");
+
+    let session = Session::load(root, root).expect("session");
+    let mut rec = Recorder { ran: Vec::new() };
+    let report = session.config_action(&["app-misc/tool".to_string()], &mut rec);
+
+    assert!(
+        report.contains(">>> Configured app-misc/tool-1"),
+        "report: {report}"
+    );
+    // The pkg_config phase ran for the installed package.
+    assert_eq!(rec.ran, vec![("tool-1".to_string(), Phase::PkgConfig)]);
+
+    // An atom with no installed match is reported, runs nothing.
+    let mut rec2 = Recorder { ran: Vec::new() };
+    let report = session.config_action(&["app-misc/absent".to_string()], &mut rec2);
+    assert!(
+        report.contains("'app-misc/absent' is not installed"),
+        "report: {report}"
+    );
+    assert!(rec2.ran.is_empty());
+}

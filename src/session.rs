@@ -290,6 +290,12 @@ impl Session {
             EmergeAction::Moo => MOO.to_string(),
             EmergeAction::Sync => self.sync_action(&mut crate::sync::LocalSync),
             EmergeAction::Regen | EmergeAction::Metadata => self.regen_action(),
+            EmergeAction::Config => {
+                // Run pkg_config via the real process spawner against the vdb's
+                // ebuild for each installed target.
+                let mut spawner = crate::executor::CommandSpawner::new("ebuild.sh");
+                self.config_action(&request.raw_targets, &mut spawner)
+            }
             other => format!("Action {other:?} is not yet implemented.\n"),
         }
     }
@@ -383,6 +389,57 @@ impl Session {
         }
         if total == 0 {
             out.push_str("No cache entries regenerated.\n");
+        }
+        out
+    }
+
+    /// Port of `emerge --config`: for each target atom, find the installed
+    /// package(s) and run their `pkg_config` phase via the injectable
+    /// [`crate::executor::PhaseSpawner`] against the configured `ROOT`. Reports
+    /// which packages were (re)configured and which atoms had no installed
+    /// match.
+    pub fn config_action(
+        &self,
+        targets: &[String],
+        spawner: &mut dyn crate::executor::PhaseSpawner,
+    ) -> String {
+        use crate::executor::phase::{BuildDirs, Phase, PhaseContext};
+        let mut out = String::new();
+
+        for target in targets {
+            let matches = self.installed.match_str(target).unwrap_or_default();
+            if matches.is_empty() {
+                out.push_str(&format!("!!! '{target}' is not installed.\n"));
+                continue;
+            }
+            for cpv in matches {
+                let meta = self.installed.metadata(&cpv).cloned().unwrap_or_default();
+                // The VDB entry dir for `category/pf` (cpv is `category/pf`).
+                let pkg_dir = match cpv.split_once('/') {
+                    Some((category, pf)) => {
+                        crate::vardb::vdb_path(&self.eroot).join(category).join(pf)
+                    }
+                    None => crate::vardb::vdb_path(&self.eroot).join(&cpv),
+                };
+                let ctx = PhaseContext {
+                    ebuild: pkg_dir.clone(),
+                    cpv: cpv.clone(),
+                    eapi: meta.eapi.clone().unwrap_or_else(|| "0".to_string()),
+                    root: self.eroot.clone(),
+                    dirs: BuildDirs::new(pkg_dir.clone(), pkg_dir),
+                    use_flags: meta.use_enabled.clone(),
+                };
+                let env = ctx.environment(Phase::PkgConfig);
+                let outcome = spawner.run_phase(Phase::PkgConfig, &env);
+                if outcome.success {
+                    out.push_str(&format!(">>> Configured {cpv}.\n"));
+                } else {
+                    out.push_str(&format!(
+                        "!!! Configuration of {cpv} failed: {}\n",
+                        outcome.message.unwrap_or_default()
+                    ));
+                }
+            }
         }
         out
     }
