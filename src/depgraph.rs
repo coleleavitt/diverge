@@ -51,6 +51,9 @@ pub struct ResolveParams {
     /// `--newuse`: reinstall an installed package when its enabled USE flags
     /// differ from the configured USE set.
     pub newuse: bool,
+    /// `package.mask` atoms (from the profile / user config). A package matching
+    /// any mask atom is invisible to selection.
+    pub masks: Vec<String>,
     /// Dependency variables to follow, in priority order.
     pub dep_keys: Vec<String>,
 }
@@ -66,6 +69,7 @@ impl Default for ResolveParams {
             update: false,
             deep: false,
             newuse: false,
+            masks: Vec::new(),
             dep_keys: vec![
                 "BDEPEND".to_string(),
                 "DEPEND".to_string(),
@@ -99,6 +103,16 @@ impl ResolveParams {
 
     pub fn with_autounmask(mut self, enabled: bool) -> Self {
         self.autounmask = enabled;
+        self
+    }
+
+    /// Sets the `package.mask` atoms; a package matching any is unselectable.
+    pub fn with_masks<I, S>(mut self, masks: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.masks = masks.into_iter().map(Into::into).collect();
         self
     }
 
@@ -295,6 +309,8 @@ impl<'a> Resolver<'a> {
                 .map(|m| self.params.keyword_visible(&m.keywords))
                 .unwrap_or(false)
         });
+        // package.mask: a cpv matching any mask atom is invisible.
+        matches.retain(|cpv| !self.is_masked(cpv));
         if let Some(pinned) = pins.get(&atom.cp()) {
             matches.retain(|cpv| cpv == pinned);
         }
@@ -306,6 +322,18 @@ impl<'a> Resolver<'a> {
     /// True when an installed package already satisfies `atom`.
     fn installed_satisfies(&self, atom: &Atom) -> bool {
         !self.installed.match_atom(atom).is_empty()
+    }
+
+    /// True when `cpv` matches any configured `package.mask` atom.
+    fn is_masked(&self, cpv: &str) -> bool {
+        if self.params.masks.is_empty() {
+            return false;
+        }
+        self.params.masks.iter().any(|mask| {
+            Atom::parse_with_options(mask, DEPENDENCY_ATOM_OPTIONS)
+                .ok()
+                .is_some_and(|atom| package_matches_atom(self.available, cpv, &atom))
+        })
     }
 
     /// Decides whether an installed-satisfied dependency should be reconsidered

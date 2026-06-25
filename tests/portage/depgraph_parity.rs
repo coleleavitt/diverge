@@ -232,3 +232,27 @@ fn required_use_violation_is_rejected() {
         outcome
     );
 }
+
+#[test]
+fn package_mask_makes_version_unselectable() {
+    // Ported from research/portage/lib/portage/tests/resolver (package.mask):
+    // a masked version is invisible; selection falls back to the unmasked one.
+    let available = db(&[("dev-libs/A-1", pkg(&[])), ("dev-libs/A-2", pkg(&[]))]);
+    let installed = PackageDb::new();
+
+    // Mask A-2 -> resolve picks A-1.
+    let params = ResolveParams::default().with_masks([">=dev-libs/A-2"]);
+    let resolver = Resolver::new(&available, &installed, params);
+    let outcome = resolver.resolve(&["dev-libs/A"]);
+    assert!(outcome.is_success(), "{:?}", outcome.error);
+    assert_eq!(outcome.mergelist, vec!["dev-libs/A-1"]);
+
+    // Masking the whole cp -> unsatisfied.
+    let params = ResolveParams::default().with_masks(["dev-libs/A"]);
+    let resolver = Resolver::new(&available, &installed, params);
+    let outcome = resolver.resolve(&["dev-libs/A"]);
+    assert!(matches!(
+        outcome.error,
+        Some(ResolveFailure::Unsatisfied(_))
+    ));
+}

@@ -140,6 +140,11 @@ impl Session {
     /// Builds the resolver parameters from this session's configuration and the
     /// request options.
     pub fn resolve_params(&self, request: &EmergeRequest) -> ResolveParams {
+        let masks = self
+            .profile
+            .as_ref()
+            .map(|p| p.package_mask.clone())
+            .unwrap_or_default();
         ResolveParams::default()
             .with_arch(self.arch())
             .with_use(self.use_flags())
@@ -148,6 +153,7 @@ impl Session {
             .with_newuse(request.options.newuse)
             .with_autounmask(request.options.autounmask.is_yes())
             .with_accept_keywords(self.accept_keywords())
+            .with_masks(masks)
     }
 
     /// Resolves a request's targets (and `@set` expansions) into a plan.
