@@ -8,8 +8,32 @@ use std::sync::Mutex;
 use diverge::sync::{LocalSync, SyncBackend, SyncConfig, SyncType};
 
 // `run` reads process-global env (PORTAGE_CONFIGROOT/ROOT); serialize the tests
-// that mutate it so they don't race.
+// that mutate it so they don't race. Only `diverge::run` reads these vars and
+// only this test binary sets them, so a process-local mutex is sufficient.
 static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+/// RAII guard that points the roots at `dir` and unconditionally restores
+/// (removes) them on drop — even if the test panics in between.
+struct RootEnv;
+impl RootEnv {
+    fn set(dir: &Path) -> Self {
+        // SAFETY: serialized by ENV_LOCK; no other reader runs concurrently.
+        unsafe {
+            std::env::set_var("PORTAGE_CONFIGROOT", dir);
+            std::env::set_var("ROOT", dir);
+        }
+        RootEnv
+    }
+}
+impl Drop for RootEnv {
+    fn drop(&mut self) {
+        // SAFETY: same serialization invariant as `set`.
+        unsafe {
+            std::env::remove_var("PORTAGE_CONFIGROOT");
+            std::env::remove_var("ROOT");
+        }
+    }
+}
 
 fn write(path: &Path, c: &str) {
     if let Some(p) = path.parent() {
@@ -46,32 +70,23 @@ fn parse_returns_request() {
 
 #[test]
 fn run_pretend_against_isolated_root() {
-    let _guard = ENV_LOCK.lock().unwrap();
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().unwrap();
     fixture(dir.path());
-    // SAFETY: serialized by ENV_LOCK; we restore by removing afterwards.
-    unsafe {
-        std::env::set_var("PORTAGE_CONFIGROOT", dir.path());
-        std::env::set_var("ROOT", dir.path());
-    }
+    let _env = RootEnv::set(dir.path());
+
     // -p hello resolves and prints a plan; run returns Ok.
     let r = diverge::run(["-p", "app-misc/hello"]);
     assert!(r.is_ok(), "run failed: {:?}", r.err());
-
     // --version path.
     assert!(diverge::run(["--version"]).is_ok());
     // A search.
     assert!(diverge::run(["-s", "hello"]).is_ok());
-
-    unsafe {
-        std::env::remove_var("PORTAGE_CONFIGROOT");
-        std::env::remove_var("ROOT");
-    }
 }
 
 #[test]
 fn run_surfaces_cli_error() {
-    let _guard = ENV_LOCK.lock().unwrap();
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let err = diverge::run(["--bogus-option-xyz"]);
     assert!(err.is_err());
     // RunError Display covers the Cli arm.
