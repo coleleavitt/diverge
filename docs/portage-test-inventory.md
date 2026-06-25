@@ -65,20 +65,38 @@ confidence (per advisor review). Categories:
 - Current Rust parity test entrypoint: `tests/portage.rs` (+ standalone suites).
 - Coverage command: `cargo llvm-cov --workspace --all-targets --summary-only`.
 
+### Action wiring status
+
+The CLI surface is at parity, and the following actions now **execute** (not
+just preview), all tested against isolated temp roots:
+
+| Action | Status |
+| --- | --- |
+| `-p`/`--pretend` merge, `--search`/`-s`, `--info`, `--list-sets`, `--depclean` (preview), `--version`, `--moo` | ✅ executes |
+| `--sync` | ✅ parses `repos.conf` (location/sync-type/sync-uri), syncs each repo via an injectable `SyncBackend` (`LocalSync`), prints emerge's per-repo banner |
+| `--regen` / `--metadata` | ✅ regenerates `metadata/md5-cache/<cat>/<pf>` from each ebuild's metadata (`repository::regen_md5_cache`) |
+| `--config` | ✅ runs the `pkg_config` phase on installed targets via the injectable `PhaseSpawner` |
+| real merge (non-pretend) | ✅ `Session::merge_action`: scheduler build phases → image merge → VDB record → world update, **gated** against `ROOT=/` |
+| `--unmerge` / `-C` | ✅ `Session::unmerge_action`: removes recorded `CONTENTS` + VDB entry, **gated** against `ROOT=/` |
+| `--prune`, `--clean`, `--rage-clean`, `--check-news` | ⏳ parse; report "not yet implemented" |
+
+Safety gate: real merge/unmerge refuse to mutate `ROOT=/` unless
+`DIVERGE_ALLOW_ROOT` is set, so a real run can never touch the host system.
+
 ### Remaining gaps to a true drop-in replacement
 
-These are honest, still-open items (the binary resolves + pretends, and can
-merge/unmerge a *built image* into an isolated ROOT, but does not yet build
-real packages on a live system):
-- Real `ebuild.sh`/EAPI phase execution + sandbox (executor models the contract
-  and spawns processes, but does not run the upstream ebuild shell — so the
-  install image is supplied to `Session::install_image`, not produced by a real
-  compile yet).
-- CLI dispatch of the mutating merge/unmerge actions (the `Session::install_image`
-  / `unmerge_package` machinery exists + is tested against temp roots; `lib::run`
-  still only dispatches `--pretend`).
-- `source` directive + eclass inheritance in config/ebuild parsing.
-- Full masks/licenses/USE_EXPAND in the resolver; binhost/GPG/real rsync sync.
+These are honest, still-open items (actions execute, but real package *building*
+on a live system is not done):
+- Real `ebuild.sh`/EAPI phase execution + sandbox (executor spawns processes via
+  a fixed argv + explicit env, but does not run the upstream ebuild shell — so a
+  merge's install image is supplied to `Session::merge_action` via the
+  `image_for` closure, not produced by a real compile yet).
+- `source` directive + eclass inheritance in config/ebuild parsing — so real
+  ebuilds' `KEYWORDS`/metadata (which come via eclass + md5-cache) aren't fully
+  resolved when reading the host tree directly.
+- Full masks/licenses/USE_EXPAND in the resolver; real network rsync/git sync
+  (modeled via `LocalSync`), binhost/GPG.
+- `--prune`/`--clean`/`--rage-clean`/`--check-news` execution.
 - Remaining resolver/* upstream cases (111 upstream files; a representative
   subset is ported — many depend on features above).
 
