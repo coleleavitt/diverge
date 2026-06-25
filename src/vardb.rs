@@ -177,6 +177,46 @@ pub fn record_install(
     Ok(())
 }
 
+/// Reads a recorded package's `CONTENTS` manifest back into [`ContentEntry`]
+/// values (the inverse of [`record_install`]'s `render_contents`). Returns an
+/// empty list when the package or its CONTENTS file is absent.
+pub fn read_contents(vdb_root: &Path, cpv: &str) -> Vec<ContentEntry> {
+    let Some((category, pf)) = cpv.split_once('/') else {
+        return Vec::new();
+    };
+    let path = vdb_root.join(category).join(pf).join("CONTENTS");
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let mut parts = line.split_whitespace();
+        match (parts.next(), parts.next()) {
+            (Some("dir"), Some(p)) => out.push(ContentEntry::Dir {
+                path: p.trim_start_matches('/').to_string(),
+            }),
+            (Some("obj"), Some(p)) => out.push(ContentEntry::File {
+                path: p.trim_start_matches('/').to_string(),
+                protected: false,
+            }),
+            (Some("sym"), Some(p)) => {
+                // `sym /path -> target mtime`
+                let target = parts
+                    .skip_while(|t| *t != "->")
+                    .nth(1)
+                    .unwrap_or_default()
+                    .to_string();
+                out.push(ContentEntry::Symlink {
+                    path: p.trim_start_matches('/').to_string(),
+                    target,
+                });
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 /// Removes a package's VDB entry directory (after an unmerge). A missing entry
 /// is not an error.
 pub fn remove_install(vdb_root: &Path, cpv: &str) -> Result<(), VardbError> {

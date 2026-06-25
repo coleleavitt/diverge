@@ -382,3 +382,156 @@ fn config_action_runs_pkg_config_on_installed() {
     );
     assert!(rec2.ran.is_empty());
 }
+
+#[test]
+fn merge_action_builds_merges_and_records() {
+    use std::collections::BTreeMap;
+
+    use diverge::executor::phase::{Phase, PhaseOutcome, PhaseSpawner};
+
+    // A spawner that succeeds every build phase.
+    struct Ok;
+    impl PhaseSpawner for Ok {
+        fn run_phase(&mut self, phase: Phase, _e: &BTreeMap<String, String>) -> PhaseOutcome {
+            PhaseOutcome {
+                phase,
+                success: true,
+                message: None,
+            }
+        }
+    }
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    let repo = root.join("var/db/repos/gentoo");
+    write(&repo.join("profiles/repo_name"), "gentoo\n");
+    write(
+        &repo.join("app-misc/hello/hello-1.ebuild"),
+        &ebuild(&[("EAPI", "7"), ("SLOT", "0"), ("KEYWORDS", "amd64")]),
+    );
+    write(
+        &root.join("etc/portage/make.conf"),
+        "ARCH=\"amd64\"\nACCEPT_KEYWORDS=\"amd64\"\n",
+    );
+    write(
+        &root.join("etc/portage/repos.conf"),
+        &format!("[gentoo]\nlocation = {}\n", repo.display()),
+    );
+    // A prebuilt image for hello (stands in for the package's D).
+    let image = root.join("images/hello");
+    write(&image.join("usr/bin/hello"), "#!/bin/sh\n");
+
+    let session = Session::load(root, root).expect("session");
+    let request = EmergeRequest::parse(["app-misc/hello"]).unwrap();
+    let mut spawner = Ok;
+    let report = session
+        .merge_action(&request, &mut spawner, |cpv| {
+            (cpv == "app-misc/hello-1").then(|| image.clone())
+        })
+        .expect("merge");
+
+    assert_eq!(report.merged, vec!["app-misc/hello-1"]);
+    assert!(report.failed.is_none());
+    // File landed in the root, VDB recorded, world updated.
+    assert!(root.join("usr/bin/hello").exists());
+    assert!(root.join("var/db/pkg/app-misc/hello-1/CONTENTS").exists());
+    assert!(
+        session
+            .world_atoms()
+            .contains(&"app-misc/hello".to_string())
+    );
+
+    // A freshly-loaded session sees it installed.
+    let reloaded = Session::load(root, root).expect("reload");
+    assert!(
+        !reloaded
+            .installed
+            .match_str("app-misc/hello")
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn merge_action_refuses_host_root() {
+    // eroot = "/" without the override must be refused (never touches host).
+    let dir = tempfile::tempdir().expect("tempdir");
+    write(
+        &dir.path().join("etc/portage/make.conf"),
+        "ARCH=\"amd64\"\n",
+    );
+    let session = Session::load(dir.path(), "/").expect("session");
+    use std::collections::BTreeMap;
+
+    use diverge::executor::phase::{Phase, PhaseOutcome, PhaseSpawner};
+    struct Ok;
+    impl PhaseSpawner for Ok {
+        fn run_phase(&mut self, phase: Phase, _e: &BTreeMap<String, String>) -> PhaseOutcome {
+            PhaseOutcome {
+                phase,
+                success: true,
+                message: None,
+            }
+        }
+    }
+    let request = EmergeRequest::parse(["app-misc/hello"]).unwrap();
+    let mut spawner = Ok;
+    let err = session
+        .merge_action(&request, &mut spawner, |_| None)
+        .expect_err("must refuse ROOT=/");
+    assert!(format!("{err}").contains("refusing to merge into ROOT=/"));
+}
+
+#[test]
+fn unmerge_action_removes_installed_files_and_entry() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    write(&root.join("etc/portage/make.conf"), "ARCH=\"amd64\"\n");
+    // Install a package by recording it (image + vdb) the way merge would.
+    use diverge::dbapi::PackageMetadata;
+    use diverge::executor::merge::ContentEntry;
+    write(&root.join("usr/bin/tool"), "x\n");
+    let contents = vec![
+        ContentEntry::Dir { path: "usr".into() },
+        ContentEntry::File {
+            path: "usr/bin/tool".into(),
+            protected: false,
+        },
+    ];
+    diverge::vardb::record_install(
+        &diverge::vardb::vdb_path(root),
+        "app-misc/tool-1",
+        &PackageMetadata {
+            slot: Some("0".into()),
+            eapi: Some("7".into()),
+            ..PackageMetadata::default()
+        },
+        &contents,
+    )
+    .unwrap();
+
+    let session = Session::load(root, root).expect("session");
+    let removed = session
+        .unmerge_action(&["app-misc/tool".to_string()])
+        .expect("unmerge");
+    assert_eq!(removed, vec!["app-misc/tool-1"]);
+    assert!(!root.join("usr/bin/tool").exists(), "file removed");
+    assert!(
+        !root.join("var/db/pkg/app-misc/tool-1").exists(),
+        "vdb entry removed"
+    );
+}
+
+#[test]
+fn unmerge_action_refuses_host_root() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    write(
+        &dir.path().join("etc/portage/make.conf"),
+        "ARCH=\"amd64\"\n",
+    );
+    let session = Session::load(dir.path(), "/").expect("session");
+    let err = session
+        .unmerge_action(&["app-misc/tool".to_string()])
+        .expect_err("must refuse ROOT=/");
+    assert!(format!("{err}").contains("refusing to unmerge from ROOT=/"));
+}

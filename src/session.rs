@@ -84,6 +84,17 @@ pub struct RepoConfig {
     pub sync_uri: Option<String>,
 }
 
+/// The result of executing a merge plan (see [`Session::merge_action`]).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MergeReport {
+    /// cpvs successfully merged into the root (image installed + VDB recorded).
+    pub merged: Vec<String>,
+    /// The cpv whose build failed, if any (stops the merge there).
+    pub failed: Option<String>,
+    /// cpvs not attempted after a failure (resume state).
+    pub remaining: Vec<String>,
+}
+
 impl Session {
     /// Loads a session from a config root and install root. Pass `/` for both
     /// to operate on the host system (read-only until an explicit merge).
@@ -296,6 +307,20 @@ impl Session {
                 let mut spawner = crate::executor::CommandSpawner::new("ebuild.sh");
                 self.config_action(&request.raw_targets, &mut spawner)
             }
+            EmergeAction::Unmerge => match self.unmerge_action(&request.raw_targets) {
+                Ok(removed) if removed.is_empty() => {
+                    ">>> No installed packages matched; nothing to unmerge.\n".to_string()
+                }
+                Ok(removed) => {
+                    let mut out = String::new();
+                    for cpv in &removed {
+                        out.push_str(&format!(">>> Unmerging {cpv}...\n"));
+                    }
+                    out.push_str(&format!("\n>>> {} package(s) unmerged.\n", removed.len()));
+                    out
+                }
+                Err(err) => format!("!!! {err}\n"),
+            },
             other => format!("Action {other:?} is not yet implemented.\n"),
         }
     }
@@ -391,6 +416,124 @@ impl Session {
             out.push_str("No cache entries regenerated.\n");
         }
         out
+    }
+
+    /// Port of `emerge --unmerge`/`-C`: removes each target's installed files
+    /// (read from the VDB `CONTENTS`) and its VDB entry, against `ROOT`. Refused
+    /// when [`Self::mutation_allowed`] is false. Returns the removed cpvs.
+    pub fn unmerge_action(&self, targets: &[String]) -> Result<Vec<String>, SessionError> {
+        if !self.mutation_allowed() {
+            return Err(SessionError::Io(
+                "refusing to unmerge from ROOT=/ (set DIVERGE_ALLOW_ROOT to override)".to_string(),
+            ));
+        }
+        let vdb = crate::vardb::vdb_path(&self.eroot);
+        let mut removed = Vec::new();
+        for target in targets {
+            for cpv in self.installed.match_str(target).unwrap_or_default() {
+                let contents = crate::vardb::read_contents(&vdb, &cpv);
+                self.unmerge_package(&cpv, &contents)?;
+                removed.push(cpv);
+            }
+        }
+        Ok(removed)
+    }
+
+    /// True when mutating this session's `eroot` is permitted. The host root
+    /// `/` is refused unless `DIVERGE_ALLOW_ROOT` is set, so a real merge can
+    /// never accidentally modify the running system. Tests use a temp root,
+    /// which is always allowed.
+    fn mutation_allowed(&self) -> bool {
+        self.eroot != Path::new("/") || std::env::var_os("DIVERGE_ALLOW_ROOT").is_some()
+    }
+
+    /// Executes a resolved merge plan against `ROOT`: runs each package's build
+    /// phases through the [`Scheduler`](crate::executor::Scheduler) (via the
+    /// injectable `spawner`), then merges its image into the root, records the
+    /// VDB entry, and updates the world file. The install image for each cpv is
+    /// supplied by `image_for` (in a full pipeline this is the package's `D`
+    /// produced by the build; tests pass a fixture image), keeping this decoupled
+    /// from real ebuild compilation.
+    ///
+    /// Refuses to run when [`Self::mutation_allowed`] is false (host `ROOT=/`).
+    pub fn merge_action(
+        &self,
+        request: &EmergeRequest,
+        spawner: &mut dyn crate::executor::PhaseSpawner,
+        image_for: impl Fn(&str) -> Option<std::path::PathBuf>,
+    ) -> Result<MergeReport, SessionError> {
+        use crate::executor::phase::{BuildDirs, PhaseContext};
+        use crate::executor::{RunMode, Scheduler};
+
+        if !self.mutation_allowed() {
+            return Err(SessionError::Io(
+                "refusing to merge into ROOT=/ (set DIVERGE_ALLOW_ROOT to override)".to_string(),
+            ));
+        }
+
+        let outcome = self.resolve(request);
+        if let Some(err) = &outcome.error {
+            return Err(SessionError::Config(format!("resolution failed: {err}")));
+        }
+
+        // Build phases for every package via the scheduler.
+        let use_flags = self.use_flags();
+        struct Plan {
+            cpvs: BTreeSet<String>,
+            use_flags: Vec<String>,
+            available: PackageDb,
+            root: PathBuf,
+        }
+        impl crate::executor::scheduler::PackagePlan for Plan {
+            fn phase_context(&self, cpv: &str) -> PhaseContext {
+                let eapi = self
+                    .available
+                    .metadata(cpv)
+                    .and_then(|m| m.eapi.clone())
+                    .unwrap_or_else(|| "0".to_string());
+                let build = self.root.join("var/tmp/portage").join(cpv);
+                PhaseContext {
+                    ebuild: build.join("ebuild"),
+                    cpv: cpv.to_string(),
+                    eapi,
+                    root: self.root.clone(),
+                    dirs: BuildDirs::new(build.clone(), build),
+                    use_flags: self.use_flags.clone(),
+                }
+            }
+        }
+        let plan = Plan {
+            cpvs: outcome.mergelist.iter().cloned().collect(),
+            use_flags,
+            available: self.available.clone(),
+            root: self.eroot.clone(),
+        };
+
+        let mut scheduler = Scheduler::new(RunMode::BuildOnly, spawner);
+        let schedule = scheduler.run(&outcome.mergelist, &plan);
+        let _ = &plan.cpvs;
+
+        let mut report = MergeReport {
+            merged: Vec::new(),
+            failed: schedule.first_failure().map(str::to_string),
+            remaining: schedule.remaining.clone(),
+        };
+
+        // Merge each successfully-built package's image into the root.
+        let oneshot = request.options.oneshot;
+        for record in &schedule.records {
+            if !record.success {
+                break;
+            }
+            let Some(image) = image_for(&record.cpv) else {
+                // No image available (e.g. nothing was actually built): skip
+                // the filesystem merge but keep the build record.
+                continue;
+            };
+            self.install_image(&record.cpv, &image, oneshot)?;
+            report.merged.push(record.cpv.clone());
+        }
+        Ok(report)
     }
 
     /// Port of `emerge --config`: for each target atom, find the installed
