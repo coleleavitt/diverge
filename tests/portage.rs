@@ -49,6 +49,8 @@ mod repository_parity;
 mod resolver_simple_parity;
 #[path = "portage/scheduler_parity.rs"]
 mod scheduler_parity;
+#[path = "portage/session_parity.rs"]
+mod session_parity;
 #[path = "portage/slot_operator_parity.rs"]
 mod slot_operator_parity;
 #[path = "portage/util_parity.rs"]

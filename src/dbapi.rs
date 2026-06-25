@@ -151,6 +151,19 @@ impl PackageDb {
             .map(|e| &e.metadata)
     }
 
+    /// Merges every entry from `other` into this db (later inserts win),
+    /// used to overlay multiple configured repositories into one store.
+    pub fn merge_from(&mut self, other: &PackageDb) {
+        for entry in &other.entries {
+            self.insert(entry.cpv.clone(), entry.metadata.clone());
+        }
+    }
+
+    /// Iterates the stored `(cpv, metadata)` entries in insertion order.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &PackageMetadata)> {
+        self.entries.iter().map(|e| (e.cpv.as_str(), &e.metadata))
+    }
+
     /// Port of `fakedbapi.match`: returns the cpvs matching `atom`, sorted by
     /// version ascending.
     pub fn match_atom(&self, atom: &Atom) -> Vec<String> {

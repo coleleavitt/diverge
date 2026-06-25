@@ -87,6 +87,16 @@ impl ResolveParams {
         self
     }
 
+    /// Replaces the accepted-keywords list (from `ACCEPT_KEYWORDS`).
+    pub fn with_accept_keywords<I, S>(mut self, keywords: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.accept_keywords = keywords.into_iter().map(Into::into).collect();
+        self
+    }
+
     pub fn with_autounmask(mut self, enabled: bool) -> Self {
         self.autounmask = enabled;
         self
