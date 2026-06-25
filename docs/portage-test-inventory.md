@@ -31,6 +31,23 @@ confidence (per advisor review). Categories:
   the use_reduce/subset suites, but individual `ur_special_append` arms depend
   on rare nesting shapes.
 
+### CLI usage banner + color
+
+- `src/color.rs` ports `portage.output`'s exact ANSI escapes (`bold=\x1b[01m`,
+  `green=\x1b[32;01m`, `turquoise=\x1b[36;01m`, `reset=\x1b[39;49;00m`) with
+  explicit (state-free) styling functions and `should_colorize` honoring
+  `--color y|n`, `NOCOLOR`, and TTY detection.
+- `cli::usage_banner(colored)` reproduces emerge's `_emerge.help.emerge_help()`
+  layout. The plain form is **byte-identical** to real `emerge` (verified on a
+  live Gentoo host); the colored form uses emerge's exact escape sequences and
+  strips back to the plain banner.
+- `lib::run` returns the process exit code: no-args prints the banner and exits
+  `1`, `--help`/`-h` exits `0` — matching emerge. `--color`, `--jobs`, etc. now
+  accept both `--opt value` and `--opt=value`, with emerge's optional-value
+  semantics (a non-value next token like an atom is left as a target).
+- Tests: `tests/portage/usage_color_parity.rs` (banner byte-parity + escapes),
+  exit codes in `tests/lib_run_cover.rs`.
+
 - Rust ports currently implemented: ~493 passing tests across 16 suites. The
   shared `tests/portage.rs` suite holds the core parity modules; additional
   standalone suites (`tests/*_extra.rs`, `tests/resolver_batch{1,2,3}.rs`) were

@@ -102,6 +102,8 @@ pub struct EmergeOptions {
     pub quiet: YesNo,
     pub autounmask: YesNo,
     pub getbinpkg: YesNo,
+    /// `--color < y | n >`: force colored output on/off (default: auto).
+    pub color: YesNo,
     // integer-valued options.
     pub jobs: Option<u32>,
     pub load_average: Option<u32>,
@@ -260,6 +262,7 @@ impl Parser {
             "--quiet" => opt.quiet = yes_no(value)?,
             "--autounmask" => opt.autounmask = yes_no(value)?,
             "--getbinpkg" => opt.getbinpkg = yes_no(value)?,
+            "--color" => opt.color = yes_no(value)?,
             "--jobs" => opt.jobs = integer(value)?,
             "--load-average" => opt.load_average = integer(value)?,
             _ => return Err(CliError::UnknownOption(name.to_string())),
@@ -276,6 +279,162 @@ impl Parser {
         }
         Ok(())
     }
+}
+
+/// Renders emerge's usage/help banner, colorized exactly like upstream's
+/// `_emerge.help.emerge_help()`: `emerge:`/`Usage:`/`Options:`/`Actions:` in
+/// bold, the `emerge` command and value placeholders in turquoise, and option
+/// names in green. Color is applied via [`crate::color`], so on a non-TTY (or
+/// `--color n`/`NOCOLOR`) the output is the plain banner byte-for-byte.
+///
+/// Reference: `research/portage/lib/_emerge/help.py`.
+pub fn usage_banner(colored: bool) -> String {
+    use crate::color::{bold, green, turquoise};
+    let b = |t: &str| bold(colored, t);
+    let g = |t: &str| green(colored, t);
+    let t = |s: &str| turquoise(colored, s);
+    let em = || t("emerge");
+    let mut out = String::new();
+
+    out.push_str(&format!(
+        "{} command-line interface to the Portage system\n",
+        b("emerge:")
+    ));
+    out.push_str(&format!("{}\n", b("Usage:")));
+    out.push_str(&format!(
+        "   {} [ {} ] [ {} ] [ {} | {} | {} | {} | {} ] [ ... ]\n",
+        em(),
+        g("options"),
+        g("action"),
+        t("ebuild"),
+        t("tbz2"),
+        t("file"),
+        t("@set"),
+        t("atom"),
+    ));
+    out.push_str(&format!(
+        "   {} [ {} ] [ {} ] < {} | {} >\n",
+        em(),
+        g("options"),
+        g("action"),
+        t("@system"),
+        t("@world"),
+    ));
+    out.push_str(&format!(
+        "   {} < {} | {} | {} >\n",
+        em(),
+        t("--sync"),
+        t("--metadata"),
+        t("--info"),
+    ));
+    out.push_str(&format!(
+        "   {} {} [ {} | {} | {} ]\n",
+        em(),
+        t("--resume"),
+        g("--pretend"),
+        g("--ask"),
+        g("--skipfirst"),
+    ));
+    out.push_str(&format!("   {} {}\n", em(), t("--help")));
+    out.push_str(&format!(
+        "{} {}[{}]\n",
+        b("Options:"),
+        g("-"),
+        g("abBcCdDefgGhjkKlnNoOpPqrsStuUvVwW"),
+    ));
+    out.push_str(&format!(
+        "          [ {} < {} | {} >            ] [ {}    ]\n",
+        g("--color"),
+        t("y"),
+        t("n"),
+        g("--columns"),
+    ));
+    out.push_str(&format!(
+        "          [ {}             ] [ {}       ]\n",
+        g("--complete-graph"),
+        g("--deep"),
+    ));
+    out.push_str(&format!(
+        "          [ {} {} ] [ {} ] [ {} {}            ]\n",
+        g("--jobs"),
+        t("JOBS"),
+        g("--keep-going"),
+        g("--load-average"),
+        t("LOAD"),
+    ));
+    out.push_str(&format!(
+        "          [ {}   ] [ {}     ] [ {}  ] [ {}   ]\n",
+        g("--newrepo"),
+        g("--newuse"),
+        g("--noconfmem"),
+        g("--nospinner"),
+    ));
+    out.push_str(&format!(
+        "          [ {}   ] [ {}   ] [ {} [ {} | {} ]        ]\n",
+        g("--oneshot"),
+        g("--onlydeps"),
+        g("--quiet-build"),
+        t("y"),
+        t("n"),
+    ));
+    out.push_str(&format!(
+        "          [ {}{}      ] [ {} < {} | {} >         ]\n",
+        g("--reinstall "),
+        t("changed-use"),
+        g("--with-bdeps"),
+        t("y"),
+        t("n"),
+    ));
+    out.push_str(&format!(
+        "{}  [ {} | {} | {} | {} | {}        ]\n",
+        b("Actions:"),
+        g("--depclean"),
+        g("--list-sets"),
+        g("--search"),
+        g("--sync"),
+        g("--version"),
+    ));
+    out.push('\n');
+    out.push_str("   For more help consult the man page.\n");
+    out
+}
+
+/// The kind of value an option's separate-argument form accepts. Used to decide
+/// whether the *next* argument is the option's (optional) value or a target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ValueKind {
+    /// A `y`/`n`-style word (`--color y`, `--ask y`).
+    YesNo,
+    /// A non-negative integer (`--jobs 8`).
+    Integer,
+}
+
+/// The value kind an option accepts as a separate argument, or `None` when the
+/// option never consumes a following argument.
+fn value_kind(name: &str) -> Option<ValueKind> {
+    match name {
+        "--color" | "--ask" | "--quiet" | "--autounmask" | "--getbinpkg" => Some(ValueKind::YesNo),
+        "--jobs" | "--load-average" => Some(ValueKind::Integer),
+        _ => None,
+    }
+}
+
+/// Pops the next argument as the option's value, but only when it plausibly is
+/// one (a y/n word, or an integer). Anything else — an atom, `@set`, or another
+/// option — is left in place, matching emerge's *optional*-value semantics
+/// (e.g. `--ask --pretend` and `--jobs dev-libs/A` leave the value unset).
+fn next_value<I: Iterator<Item = String>>(
+    argv: &mut std::iter::Peekable<I>,
+    kind: ValueKind,
+) -> Option<String> {
+    let plausible = match argv.peek() {
+        Some(next) => match kind {
+            ValueKind::YesNo => YesNo::parse(next).is_some(),
+            ValueKind::Integer => next.parse::<u32>().is_ok(),
+        },
+        None => false,
+    };
+    if plausible { argv.next() } else { None }
 }
 
 /// Maps an action long option to its [`EmergeAction`].
@@ -312,11 +471,26 @@ impl EmergeRequest {
             sets: Vec::new(),
         };
 
-        for arg in args.into_iter().map(Into::into) {
+        let mut argv = args.into_iter().map(Into::into).peekable();
+        while let Some(arg) = argv.next() {
             if let Some(long) = arg.strip_prefix("--") {
                 let (name, value) = match long.split_once('=') {
                     Some((n, v)) => (format!("--{n}"), Some(v.to_string())),
                     None => (arg.clone(), None),
+                };
+                // A value-taking option with no `=value` may consume the next
+                // argument (emerge accepts both `--color y` and `--color=y`).
+                // The value is optional, so only a *plausible* next token is
+                // consumed: a `y/n` word for the y/n options, a number for the
+                // integer options. Anything else (an atom, `@set`, another
+                // option) is left as a separate argument.
+                let value = if value.is_none() {
+                    match value_kind(&name) {
+                        Some(kind) => next_value(&mut argv, kind),
+                        None => None,
+                    }
+                } else {
+                    value
                 };
                 parser.apply_long(&name, value.as_deref())?;
             } else if arg.starts_with('-') && arg.len() > 1 {

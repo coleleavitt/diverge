@@ -95,6 +95,17 @@ fn run_surfaces_cli_error() {
 }
 
 #[test]
+fn run_exit_codes_match_emerge() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    // No arguments: usage banner, exit 1 (like emerge).
+    let no_args: [&str; 0] = [];
+    assert_eq!(diverge::run(no_args).ok(), Some(1));
+    // --help / -h: usage banner, exit 0.
+    assert_eq!(diverge::run(["--help"]).ok(), Some(0));
+    assert_eq!(diverge::run(["-h"]).ok(), Some(0));
+}
+
+#[test]
 fn sync_nested_tree_and_changes_reported() {
     let dir = tempfile::tempdir().unwrap();
     let src = dir.path().join("src");

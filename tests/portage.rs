@@ -55,6 +55,8 @@ mod scheduler_parity;
 mod session_parity;
 #[path = "portage/slot_operator_parity.rs"]
 mod slot_operator_parity;
+#[path = "portage/usage_color_parity.rs"]
+mod usage_color_parity;
 #[path = "portage/util_parity.rs"]
 mod util_parity;
 #[path = "portage/version_parity.rs"]

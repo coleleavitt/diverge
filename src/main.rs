@@ -1,6 +1,9 @@
 fn main() {
-    if let Err(error) = diverge::run(std::env::args().skip(1)) {
-        eprintln!("diverge: {error}");
-        std::process::exit(1);
+    match diverge::run(std::env::args().skip(1)) {
+        Ok(code) => std::process::exit(code),
+        Err(error) => {
+            eprintln!("diverge: {error}");
+            std::process::exit(1);
+        }
     }
 }
