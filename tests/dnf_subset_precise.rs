@@ -1,7 +1,7 @@
 //! Precise inputs to reach dep.rs select_subset group-in-disjunction and the
 //! selected-token push paths.
 
-use diverge::dep::{use_reduce, UseReduceOptions};
+use diverge::dep::{UseReduceOptions, use_reduce};
 
 fn reduce_subset(s: &str, uselist: &[&str], subset: &[&str]) -> Vec<diverge::dep::Dep> {
     let opts = UseReduceOptions {
