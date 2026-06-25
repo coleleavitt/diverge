@@ -73,7 +73,7 @@ fn matching_slot_subslot_mismatch_and_best_glob() {
 }
 
 #[test]
-fn session_unimplemented_action_message() {
+fn session_all_actions_are_wired() {
     use diverge::cli::EmergeRequest;
     use diverge::session::Session;
     let dir = tempfile::tempdir().unwrap();
@@ -82,10 +82,22 @@ fn session_unimplemented_action_message() {
         "ARCH=\"amd64\"\n",
     );
     let s = Session::load(dir.path(), dir.path()).unwrap();
-    // --prune is a known action still routed to the not-yet-implemented arm.
-    let req = EmergeRequest::parse(["--prune", "dev-libs/A"]).unwrap();
-    let out = s.dispatch(&req);
-    assert!(out.contains("not yet implemented"), "out: {out}");
+    // Every dispatched action now executes — none reports "not yet implemented".
+    for args in [
+        vec!["--prune"],
+        vec!["--clean"],
+        vec!["--rage-clean"],
+        vec!["--check-news"],
+        vec!["--list-sets"],
+        vec!["--info"],
+    ] {
+        let req = EmergeRequest::parse(args.clone()).unwrap();
+        let out = s.dispatch(&req);
+        assert!(
+            !out.contains("not yet implemented"),
+            "{args:?} should be wired, got: {out}"
+        );
+    }
 }
 
 #[test]

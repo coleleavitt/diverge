@@ -307,20 +307,28 @@ impl Session {
                 let mut spawner = crate::executor::CommandSpawner::new("ebuild.sh");
                 self.config_action(&request.raw_targets, &mut spawner)
             }
-            EmergeAction::Unmerge => match self.unmerge_action(&request.raw_targets) {
-                Ok(removed) if removed.is_empty() => {
-                    ">>> No installed packages matched; nothing to unmerge.\n".to_string()
-                }
-                Ok(removed) => {
-                    let mut out = String::new();
-                    for cpv in &removed {
-                        out.push_str(&format!(">>> Unmerging {cpv}...\n"));
+            EmergeAction::Unmerge => {
+                render_removal(self.unmerge_action(&request.raw_targets), "unmerged")
+            }
+            EmergeAction::Clean | EmergeAction::RageClean => {
+                render_removal(self.clean_action(), "cleaned")
+            }
+            EmergeAction::Prune => render_removal(self.prune_action(), "pruned"),
+            EmergeAction::CheckNews => {
+                let items = self.check_news();
+                if items.is_empty() {
+                    "No unread news items relevant to this system.\n".to_string()
+                } else {
+                    let mut out = format!(
+                        "{} unread news item(s) relevant to this system:\n",
+                        items.len()
+                    );
+                    for name in &items {
+                        out.push_str(&format!("  {name}\n"));
                     }
-                    out.push_str(&format!("\n>>> {} package(s) unmerged.\n", removed.len()));
                     out
                 }
-                Err(err) => format!("!!! {err}\n"),
-            },
+            }
             other => format!("Action {other:?} is not yet implemented.\n"),
         }
     }
@@ -416,6 +424,130 @@ impl Session {
             out.push_str("No cache entries regenerated.\n");
         }
         out
+    }
+
+    /// Port of `emerge --depclean`/`--clean`/`--rage-clean` *execution*: computes
+    /// the removal set (installed packages not reachable from the world+system
+    /// protected set) and unmerges each, gated against `ROOT=/`. Returns the
+    /// removed cpvs. (`--depclean` itself stays preview via `depclean_report`;
+    /// this is the destructive clean path.)
+    pub fn clean_action(&self) -> Result<Vec<String>, SessionError> {
+        if !self.mutation_allowed() {
+            return Err(SessionError::Io(
+                "refusing to clean ROOT=/ (set DIVERGE_ALLOW_ROOT to override)".to_string(),
+            ));
+        }
+        let mut protected = self.world_atoms();
+        if let Some(profile) = &self.profile {
+            protected.extend(profile.system_set.clone());
+        }
+        let protected_refs: Vec<&str> = protected.iter().map(String::as_str).collect();
+        let resolver = Resolver::new(&self.available, &self.installed, ResolveParams::default());
+        let cleanlist = resolver.depclean(&protected_refs);
+        self.unmerge_cpvs(&cleanlist)
+    }
+
+    /// Port of `emerge --prune`: keep only the highest installed version per
+    /// `cp` (slot-aware), unmerging the lower ones. Gated against `ROOT=/`.
+    pub fn prune_action(&self) -> Result<Vec<String>, SessionError> {
+        if !self.mutation_allowed() {
+            return Err(SessionError::Io(
+                "refusing to prune ROOT=/ (set DIVERGE_ALLOW_ROOT to override)".to_string(),
+            ));
+        }
+        // Group installed cpvs by (cp, slot); keep the highest version in each.
+        let mut by_key: std::collections::BTreeMap<(String, String), Vec<String>> =
+            std::collections::BTreeMap::new();
+        for cpv in self.installed.cpv_all() {
+            let (cp, _) = crate::version::split_cpv(&cpv);
+            let slot = self
+                .installed
+                .metadata(&cpv)
+                .and_then(|m| m.slot.clone())
+                .unwrap_or_else(|| "0".to_string());
+            by_key.entry((cp, slot)).or_default().push(cpv);
+        }
+        let mut prunelist = Vec::new();
+        for (_, mut cpvs) in by_key {
+            if cpvs.len() < 2 {
+                continue;
+            }
+            cpvs.sort_by(|a, b| crate::version::cpv_cmp(a, b));
+            // All but the highest version are pruned.
+            cpvs.pop();
+            prunelist.extend(cpvs);
+        }
+        prunelist.sort_by(|a, b| crate::version::cpv_cmp(a, b));
+        self.unmerge_cpvs(&prunelist)
+    }
+
+    /// Unmerges a list of exact cpvs (reading each one's recorded CONTENTS).
+    fn unmerge_cpvs(&self, cpvs: &[String]) -> Result<Vec<String>, SessionError> {
+        let vdb = crate::vardb::vdb_path(&self.eroot);
+        let mut removed = Vec::new();
+        for cpv in cpvs {
+            let contents = crate::vardb::read_contents(&vdb, cpv);
+            self.unmerge_package(cpv, &contents)?;
+            removed.push(cpv.clone());
+        }
+        Ok(removed)
+    }
+
+    /// Port of `emerge --check-news`: returns the GLEP 42 news items relevant to
+    /// this system (by installed packages, keyword, and profile) that the user
+    /// has not yet read. News items live at `<repo>/metadata/news/<item>/` and
+    /// the read set at `<eroot>/var/lib/gentoo/news/news-<repo>.read`.
+    pub fn check_news(&self) -> Vec<String> {
+        use crate::news::{NewsEnvironment, NewsItem, ReadTracker};
+        let env = NewsEnvironment {
+            installed: self.installed.cpv_all(),
+            keyword: self.arch(),
+            profile: self
+                .profile
+                .as_ref()
+                .and_then(|_| {
+                    std::fs::read_link(self.config_root.join("etc/portage/make.profile")).ok()
+                })
+                .map(|p| p.to_string_lossy().into_owned()),
+        };
+
+        let mut relevant_unread = Vec::new();
+        for repo in &self.repos {
+            let news_dir = repo.location.join("metadata").join("news");
+            let Ok(entries) = std::fs::read_dir(&news_dir) else {
+                continue;
+            };
+            // The per-repo read set.
+            let read_path = self
+                .eroot
+                .join("var/lib/gentoo/news")
+                .join(format!("news-{}.read", repo.name));
+            let tracker = std::fs::read_to_string(&read_path)
+                .map(|c| ReadTracker::parse(&c))
+                .unwrap_or_default();
+
+            let mut names: Vec<String> = entries
+                .filter_map(Result::ok)
+                .filter(|e| e.path().is_dir())
+                .filter_map(|e| e.file_name().to_str().map(str::to_string))
+                .collect();
+            names.sort();
+            for name in names {
+                if tracker.is_read(&name) {
+                    continue;
+                }
+                // The news item text lives at <dir>/<name>/<name>.en.txt.
+                let item_path = news_dir.join(&name).join(format!("{name}.en.txt"));
+                let Ok(text) = std::fs::read_to_string(&item_path) else {
+                    continue;
+                };
+                let item = NewsItem::parse(&text);
+                if item.is_valid() && item.is_relevant(&env) {
+                    relevant_unread.push(name);
+                }
+            }
+        }
+        relevant_unread
     }
 
     /// Port of `emerge --unmerge`/`-C`: removes each target's installed files
@@ -683,6 +815,25 @@ impl Session {
             self.installed.len()
         ));
         out
+    }
+}
+
+/// Renders a removal-action result (unmerge/clean/prune) as an emerge-style
+/// report, listing each removed cpv and the count, or surfacing the error.
+fn render_removal(result: Result<Vec<String>, SessionError>, verb: &str) -> String {
+    match result {
+        Ok(removed) if removed.is_empty() => {
+            format!(">>> Nothing to be {verb}.\n")
+        }
+        Ok(removed) => {
+            let mut out = String::new();
+            for cpv in &removed {
+                out.push_str(&format!(">>> Unmerging {cpv}...\n"));
+            }
+            out.push_str(&format!("\n>>> {} package(s) {verb}.\n", removed.len()));
+            out
+        }
+        Err(err) => format!("!!! {err}\n"),
     }
 }
 

@@ -535,3 +535,134 @@ fn unmerge_action_refuses_host_root() {
         .expect_err("must refuse ROOT=/");
     assert!(format!("{err}").contains("refusing to unmerge from ROOT=/"));
 }
+
+#[test]
+fn prune_action_keeps_highest_version_per_slot() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    write(&root.join("etc/portage/make.conf"), "ARCH=\"amd64\"\n");
+    // Three installed versions of the same cp+slot; prune keeps only the newest.
+    use diverge::dbapi::PackageMetadata;
+    use diverge::executor::merge::ContentEntry;
+    let vdb = diverge::vardb::vdb_path(root);
+    for ver in ["1", "2", "3"] {
+        let cpv = format!("dev-libs/foo-{ver}");
+        write(&root.join(format!("usr/lib/foo{ver}")), "x\n");
+        diverge::vardb::record_install(
+            &vdb,
+            &cpv,
+            &PackageMetadata {
+                slot: Some("0".into()),
+                eapi: Some("7".into()),
+                ..Default::default()
+            },
+            &[ContentEntry::File {
+                path: format!("usr/lib/foo{ver}"),
+                protected: false,
+            }],
+        )
+        .unwrap();
+    }
+    let session = Session::load(root, root).expect("session");
+    let pruned = session.prune_action().expect("prune");
+    // Versions 1 and 2 pruned; 3 kept.
+    assert_eq!(pruned, vec!["dev-libs/foo-1", "dev-libs/foo-2"]);
+    assert!(root.join("var/db/pkg/dev-libs/foo-3").exists());
+    assert!(!root.join("var/db/pkg/dev-libs/foo-1").exists());
+    assert!(!root.join("usr/lib/foo1").exists());
+}
+
+#[test]
+fn clean_action_removes_unreferenced_installed() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    write(&root.join("etc/portage/make.conf"), "ARCH=\"amd64\"\n");
+    use diverge::dbapi::PackageMetadata;
+    let vdb = diverge::vardb::vdb_path(root);
+    // keep is in world; orphan is not referenced anywhere -> cleaned.
+    for cpv in ["dev-libs/keep-1", "dev-libs/orphan-1"] {
+        diverge::vardb::record_install(
+            &vdb,
+            cpv,
+            &PackageMetadata {
+                slot: Some("0".into()),
+                eapi: Some("7".into()),
+                ..Default::default()
+            },
+            &[],
+        )
+        .unwrap();
+    }
+    write(&root.join("var/lib/portage/world"), "dev-libs/keep\n");
+
+    let session = Session::load(root, root).expect("session");
+    let cleaned = session.clean_action().expect("clean");
+    assert_eq!(cleaned, vec!["dev-libs/orphan-1"]);
+    assert!(root.join("var/db/pkg/dev-libs/keep-1").exists());
+    assert!(!root.join("var/db/pkg/dev-libs/orphan-1").exists());
+}
+
+#[test]
+fn clean_and_prune_refuse_host_root() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    write(
+        &dir.path().join("etc/portage/make.conf"),
+        "ARCH=\"amd64\"\n",
+    );
+    let session = Session::load(dir.path(), "/").expect("session");
+    assert!(
+        format!("{}", session.clean_action().unwrap_err()).contains("refusing to clean ROOT=/")
+    );
+    assert!(
+        format!("{}", session.prune_action().unwrap_err()).contains("refusing to prune ROOT=/")
+    );
+}
+
+#[test]
+fn check_news_lists_relevant_unread_items() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    let repo = root.join("var/db/repos/gentoo");
+    write(&repo.join("profiles/repo_name"), "gentoo\n");
+    write(&root.join("etc/portage/make.conf"), "ARCH=\"amd64\"\n");
+    write(
+        &root.join("etc/portage/repos.conf"),
+        &format!("[gentoo]\nlocation = {}\n", repo.display()),
+    );
+    // A news item that is Display-If-Installed dev-libs/foo (which is installed).
+    let item = "2024-01-01-test";
+    write(
+        &repo.join(format!("metadata/news/{item}/{item}.en.txt")),
+        "Title: Test\nAuthor: a\nPosted: 2024-01-01\nRevision: 1\nNews-Item-Format: 2.0\n\
+         Display-If-Installed: dev-libs/foo\n\nbody\n",
+    );
+    // Install dev-libs/foo so the item is relevant.
+    use diverge::dbapi::PackageMetadata;
+    diverge::vardb::record_install(
+        &diverge::vardb::vdb_path(root),
+        "dev-libs/foo-1",
+        &PackageMetadata {
+            slot: Some("0".into()),
+            eapi: Some("7".into()),
+            ..Default::default()
+        },
+        &[],
+    )
+    .unwrap();
+
+    let session = Session::load(root, root).expect("session");
+    let unread = session.check_news();
+    assert_eq!(unread, vec![item.to_string()]);
+
+    // An irrelevant item (Display-If-Installed a missing pkg) is not listed.
+    let item2 = "2024-02-02-other";
+    write(
+        &repo.join(format!("metadata/news/{item2}/{item2}.en.txt")),
+        "Title: Other\nAuthor: a\nPosted: 2024-02-02\nRevision: 1\nNews-Item-Format: 2.0\n\
+         Display-If-Installed: dev-libs/not-installed\n\nbody\n",
+    );
+    let session = Session::load(root, root).expect("reload");
+    let unread = session.check_news();
+    assert!(unread.contains(&item.to_string()));
+    assert!(!unread.contains(&item2.to_string()));
+}
