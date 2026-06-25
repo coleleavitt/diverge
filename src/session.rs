@@ -164,6 +164,97 @@ impl Session {
         let outcome = self.resolve(request);
         render_plan(request, &outcome, self)
     }
+
+    /// Installs an already-built package image into this session's `eroot`:
+    /// merges `image` into the root under CONFIG_PROTECT, records the package in
+    /// the VDB (CONTENTS + metadata), and adds `cpv`'s cp to the world file
+    /// unless `oneshot`. Returns the merged file list.
+    ///
+    /// Safety: every write goes under `self.eroot` (tests pass a tempdir). This
+    /// is the building block the merge action composes per package.
+    pub fn install_image(
+        &self,
+        cpv: &str,
+        image: &Path,
+        oneshot: bool,
+    ) -> Result<crate::executor::MergeResult, SessionError> {
+        let protect = self.config_protect();
+        let result = crate::executor::MergeTransaction::new(image, &self.eroot, &protect)
+            .run()
+            .map_err(|e| SessionError::Io(e.to_string()))?;
+
+        // Record into the VDB using the available metadata (or a default).
+        let metadata = self.available.metadata(cpv).cloned().unwrap_or_default();
+        crate::vardb::record_install(
+            &crate::vardb::vdb_path(&self.eroot),
+            cpv,
+            &metadata,
+            &result.contents,
+        )
+        .map_err(|e| SessionError::Vardb(e.to_string()))?;
+
+        if !oneshot {
+            self.add_to_world(cpv)?;
+        }
+        Ok(result)
+    }
+
+    /// Builds the CONFIG_PROTECT resolver from this session's variables
+    /// (defaulting to `/etc` when unset, like Portage).
+    fn config_protect(&self) -> crate::executor::ConfigProtect {
+        let protect_var = self
+            .variables
+            .get("CONFIG_PROTECT")
+            .cloned()
+            .unwrap_or_else(|| "/etc".to_string());
+        let mask_var = self
+            .variables
+            .get("CONFIG_PROTECT_MASK")
+            .cloned()
+            .unwrap_or_default();
+        let protect: Vec<&str> = protect_var.split_whitespace().collect();
+        let mask: Vec<&str> = mask_var.split_whitespace().collect();
+        crate::executor::ConfigProtect::new(&protect, &mask)
+    }
+
+    /// The path to the world file (`<eroot>/var/lib/portage/world`).
+    pub fn world_path(&self) -> PathBuf {
+        self.eroot.join("var/lib/portage/world")
+    }
+
+    /// Adds a cpv's `category/package` to the world file (read-modify-write),
+    /// creating it if absent. Returns whether it was newly added.
+    fn add_to_world(&self, cpv: &str) -> Result<bool, SessionError> {
+        let path = self.world_path();
+        let existing = std::fs::read_to_string(&path).unwrap_or_default();
+        let mut world = crate::sets::WorldFile::parse(&existing);
+        let cp = crate::version::split_cpv(cpv).0;
+        let added = world.add(cp);
+        if added {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| SessionError::Io(format!("{}: {e}", parent.display())))?;
+            }
+            std::fs::write(&path, world.render())
+                .map_err(|e| SessionError::Io(format!("{}: {e}", path.display())))?;
+        }
+        Ok(added)
+    }
+
+    /// Unmerges an installed package: removes its recorded files from the root
+    /// (using the merge result's contents) and deletes its VDB entry. Used by
+    /// the unmerge action. Writes only under `self.eroot`.
+    pub fn unmerge_package(
+        &self,
+        cpv: &str,
+        contents: &[crate::executor::ContentEntry],
+    ) -> Result<(), SessionError> {
+        crate::executor::unmerge(&self.eroot, contents)
+            .map_err(|e| SessionError::Io(e.to_string()))?;
+        crate::vardb::remove_install(&crate::vardb::vdb_path(&self.eroot), cpv)
+            .map_err(|e| SessionError::Vardb(e.to_string()))?;
+        Ok(())
+    }
 }
 
 /// Loads make.globals + make.conf with profile-aware variable expansion.

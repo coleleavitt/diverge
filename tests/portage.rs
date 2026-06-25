@@ -35,6 +35,8 @@ mod executor_parity;
 mod fetch_spawn_parity;
 #[path = "portage/full_pipeline.rs"]
 mod full_pipeline;
+#[path = "portage/install_parity.rs"]
+mod install_parity;
 #[path = "portage/manifest_parity.rs"]
 mod manifest_parity;
 #[path = "portage/matching_parity.rs"]

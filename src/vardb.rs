@@ -16,6 +16,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use crate::dbapi::{PackageDb, PackageMetadata};
+use crate::executor::merge::ContentEntry;
 
 /// Error raised while loading the installed-package database.
 #[derive(Debug)]
@@ -127,4 +128,84 @@ fn read_dir_sorted(path: &Path) -> Result<Vec<String>, VardbError> {
 /// The conventional VDB path under an EROOT (`<eroot>/var/db/pkg`).
 pub fn vdb_path(eroot: &Path) -> PathBuf {
     eroot.join("var/db/pkg")
+}
+
+/// Records a newly-merged package into the VDB at `vdb_root`: writes the
+/// per-key metadata files and the `CONTENTS` manifest. Mirrors what
+/// `dblink.merge` records in `/var/db/pkg/<cat>/<pf>/`.
+///
+/// `cpv` is `category/package-version`; `contents` is the merged file list
+/// (typically a [`crate::executor::merge::MergeResult`]'s `contents`). This
+/// only ever writes under `vdb_root`, which callers must keep isolated in tests.
+pub fn record_install(
+    vdb_root: &Path,
+    cpv: &str,
+    metadata: &PackageMetadata,
+    contents: &[ContentEntry],
+) -> Result<(), VardbError> {
+    let (category, pf) = cpv
+        .split_once('/')
+        .ok_or_else(|| VardbError::Io(format!("invalid cpv: '{cpv}'")))?;
+    let pkg_dir = vdb_root.join(category).join(pf);
+    std::fs::create_dir_all(&pkg_dir)
+        .map_err(|e| VardbError::Io(format!("{}: {e}", pkg_dir.display())))?;
+
+    let write = |key: &str, value: &str| -> Result<(), VardbError> {
+        std::fs::write(pkg_dir.join(key), format!("{value}\n"))
+            .map_err(|e| VardbError::Io(format!("{}: {e}", pkg_dir.join(key).display())))
+    };
+
+    write("CATEGORY", category)?;
+    write("PF", pf)?;
+    write(
+        "SLOT",
+        &metadata.aux("SLOT").unwrap_or_else(|| "0".to_string()),
+    )?;
+    if let Some(eapi) = &metadata.eapi {
+        write("EAPI", eapi)?;
+    }
+    if let Some(repo) = &metadata.repo {
+        write("repository", repo)?;
+    }
+    write("IUSE", &metadata.iuse.join(" "))?;
+    write("USE", &metadata.use_enabled.join(" "))?;
+    write("KEYWORDS", &metadata.keywords.join(" "))?;
+    for (key, value) in &metadata.deps {
+        write(key, value)?;
+    }
+    write("CONTENTS", &render_contents(contents))?;
+    Ok(())
+}
+
+/// Removes a package's VDB entry directory (after an unmerge). A missing entry
+/// is not an error.
+pub fn remove_install(vdb_root: &Path, cpv: &str) -> Result<(), VardbError> {
+    let Some((category, pf)) = cpv.split_once('/') else {
+        return Err(VardbError::Io(format!("invalid cpv: '{cpv}'")));
+    };
+    let pkg_dir = vdb_root.join(category).join(pf);
+    match std::fs::remove_dir_all(&pkg_dir) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(VardbError::Io(format!("{}: {e}", pkg_dir.display()))),
+    }
+}
+
+/// Renders a CONTENTS manifest in Portage's format: `dir <path>`,
+/// `obj <path> <md5> <mtime>` (md5/mtime are placeholders here), `sym <path> ->
+/// <target> <mtime>`.
+fn render_contents(contents: &[ContentEntry]) -> String {
+    let mut out = String::new();
+    for entry in contents {
+        match entry {
+            ContentEntry::Dir { path } => out.push_str(&format!("dir /{path}\n")),
+            ContentEntry::File { path, .. } => {
+                out.push_str(&format!("obj /{path} 0 0\n"));
+            }
+            ContentEntry::Symlink { path, target } => {
+                out.push_str(&format!("sym /{path} -> {target} 0\n"));
+            }
+        }
+    }
+    out
 }

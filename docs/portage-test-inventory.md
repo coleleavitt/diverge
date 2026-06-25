@@ -26,12 +26,16 @@ This inventory records every upstream Python test file currently present so dive
 
 ### Remaining gaps to a true drop-in replacement
 
-These are honest, still-open items (the binary resolves + pretends, but does not
-yet build/merge on a real system):
+These are honest, still-open items (the binary resolves + pretends, and can
+merge/unmerge a *built image* into an isolated ROOT, but does not yet build
+real packages on a live system):
 - Real `ebuild.sh`/EAPI phase execution + sandbox (executor models the contract
-  and spawns processes, but does not run the upstream ebuild shell).
-- Mutating actions wired through the CLI (merge/unmerge/depclean execution);
-  currently only `--pretend` is dispatched.
+  and spawns processes, but does not run the upstream ebuild shell — so the
+  install image is supplied to `Session::install_image`, not produced by a real
+  compile yet).
+- CLI dispatch of the mutating merge/unmerge actions (the `Session::install_image`
+  / `unmerge_package` machinery exists + is tested against temp roots; `lib::run`
+  still only dispatches `--pretend`).
 - `source` directive + eclass inheritance in config/ebuild parsing.
 - Full masks/licenses/USE_EXPAND in the resolver; binhost/GPG/real rsync sync.
 - Remaining resolver/* upstream cases (111 upstream files; a representative
