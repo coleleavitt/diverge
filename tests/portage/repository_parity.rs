@@ -110,3 +110,56 @@ fn repository_requires_repo_name() {
     let err = Repository::load(dir.path()).expect_err("must require repo_name");
     assert!(format!("{err}").contains("repo_name"), "got: {err}");
 }
+
+#[test]
+fn md5_cache_metadata_is_preferred_over_ebuild() {
+    // The ebuild itself declares no KEYWORDS (as if it inherits from an eclass);
+    // the md5-cache carries the eclass-resolved KEYWORDS. The loader must use
+    // the cache entry so the package is visible.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repo = dir.path();
+    write(&repo.join("profiles/repo_name"), "gentoo\n");
+    // Ebuild with NO keywords (inherits in real life) and a stand-in SLOT.
+    write(
+        &repo.join("app-shells/bash/bash-5.2.ebuild"),
+        "EAPI=\"8\"\ninherit some-eclass\n",
+    );
+    // The eclass-resolved md5-cache entry.
+    write(
+        &repo.join("metadata/md5-cache/app-shells/bash-5.2"),
+        "EAPI=8\nSLOT=0\nKEYWORDS=amd64 ~x86\nIUSE=nls\nRDEPEND=sys-libs/ncurses\n",
+    );
+
+    let loaded = Repository::load(repo).expect("load repo");
+    let meta = loaded
+        .db
+        .metadata("app-shells/bash-5.2")
+        .expect("bash metadata");
+    // Cache KEYWORDS used (not the empty ebuild ones).
+    assert_eq!(meta.keywords, vec!["amd64".to_string(), "~x86".to_string()]);
+    assert_eq!(meta.eapi.as_deref(), Some("8"));
+    assert_eq!(
+        meta.deps.get("RDEPEND").map(String::as_str),
+        Some("sys-libs/ncurses")
+    );
+    // The package is keyword-visible, so a stable-amd64 resolve sees it.
+    assert_eq!(
+        loaded.db.match_str("app-shells/bash").unwrap(),
+        vec!["app-shells/bash-5.2"]
+    );
+}
+
+#[test]
+fn ebuild_is_parsed_when_no_cache_entry() {
+    // No md5-cache -> falls back to parsing the raw ebuild.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repo = dir.path();
+    write(&repo.join("profiles/repo_name"), "gentoo\n");
+    write(
+        &repo.join("dev-libs/a/a-1.ebuild"),
+        &ebuild(&[("EAPI", "7"), ("SLOT", "0"), ("KEYWORDS", "amd64")]),
+    );
+    let loaded = Repository::load(repo).expect("load");
+    let meta = loaded.db.metadata("dev-libs/a-1").expect("metadata");
+    assert_eq!(meta.keywords, vec!["amd64".to_string()]);
+}

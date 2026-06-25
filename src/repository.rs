@@ -69,6 +69,8 @@ impl Repository {
         }
         let name = read_repo_name(root)?;
         let mut db = PackageDb::new();
+        // The eclass-resolved metadata cache, if the repo ships one.
+        let cache_root = root.join("metadata").join("md5-cache");
 
         for category in read_dir_sorted(root)? {
             let cat_path = root.join(&category);
@@ -80,7 +82,7 @@ impl Repository {
                 if !pkg_path.is_dir() {
                     continue;
                 }
-                load_package(&pkg_path, &category, &package, &name, &mut db)?;
+                load_package(&pkg_path, &cache_root, &category, &package, &name, &mut db)?;
             }
         }
 
@@ -184,6 +186,7 @@ fn read_dir_sorted(path: &Path) -> Result<Vec<String>, RepositoryError> {
 
 fn load_package(
     pkg_path: &Path,
+    cache_root: &Path,
     category: &str,
     package: &str,
     repo_name: &str,
@@ -198,14 +201,63 @@ fn load_package(
         let Some(version) = stem.strip_prefix(&format!("{package}-")) else {
             continue;
         };
-        let ebuild_path = pkg_path.join(&file);
-        let content = std::fs::read_to_string(&ebuild_path)
-            .map_err(|err| RepositoryError::Io(format!("{}: {err}", ebuild_path.display())))?;
-        let metadata = parse_ebuild_metadata(&content, &ebuild_path, repo_name)?;
-        let cpv = format!("{category}/{package}-{version}");
-        db.insert(cpv, metadata);
+        let pf = format!("{package}-{version}");
+
+        // Prefer the eclass-resolved md5-cache entry (which carries the real
+        // KEYWORDS/SLOT/EAPI/deps for ebuilds that inherit eclasses); fall back
+        // to parsing the raw ebuild when no cache entry exists.
+        let cache_entry = cache_root.join(category).join(&pf);
+        let metadata = if let Ok(cache_text) = std::fs::read_to_string(&cache_entry) {
+            parse_md5_cache_entry(&cache_text, repo_name)
+        } else {
+            let ebuild_path = pkg_path.join(&file);
+            let content = std::fs::read_to_string(&ebuild_path)
+                .map_err(|err| RepositoryError::Io(format!("{}: {err}", ebuild_path.display())))?;
+            parse_ebuild_metadata(&content, &ebuild_path, repo_name)?
+        };
+        db.insert(format!("{category}/{pf}"), metadata);
     }
     Ok(())
+}
+
+/// Parses an md5-cache entry (`KEY=value` per line, eclass-resolved) into
+/// [`PackageMetadata`]. Unlike the ebuild parser, values are already final —
+/// no shell expansion is needed.
+fn parse_md5_cache_entry(text: &str, repo_name: &str) -> PackageMetadata {
+    let mut vars: HashMap<String, String> = HashMap::new();
+    for line in text.lines() {
+        if let Some((key, value)) = line.split_once('=') {
+            vars.insert(key.to_string(), value.to_string());
+        }
+    }
+    metadata_from_vars(&vars, repo_name)
+}
+
+/// Builds [`PackageMetadata`] from a resolved `KEY -> value` map (shared by the
+/// md5-cache and ebuild paths).
+fn metadata_from_vars(vars: &HashMap<String, String>, repo_name: &str) -> PackageMetadata {
+    let tokens = |key: &str| -> Vec<String> {
+        vars.get(key)
+            .map(|v| v.split_whitespace().map(strip_iuse_default).collect())
+            .unwrap_or_default()
+    };
+    let (slot, sub_slot) = split_slot(vars.get("SLOT").map(String::as_str).unwrap_or("0"));
+    let mut deps = std::collections::BTreeMap::new();
+    for key in DEP_KEYS {
+        if let Some(value) = vars.get(*key) {
+            deps.insert((*key).to_string(), value.clone());
+        }
+    }
+    PackageMetadata {
+        slot: Some(slot),
+        sub_slot,
+        repo: Some(repo_name.to_string()),
+        eapi: Some(vars.get("EAPI").cloned().unwrap_or_else(|| "0".to_string())),
+        iuse: tokens("IUSE"),
+        use_enabled: Vec::new(),
+        keywords: tokens("KEYWORDS"),
+        deps,
+    }
 }
 
 /// The dependency variable keys an ebuild may declare.
@@ -229,31 +281,7 @@ fn parse_ebuild_metadata(
         path: path.to_path_buf(),
         error,
     })?;
-
-    let tokens = |key: &str| -> Vec<String> {
-        vars.get(key)
-            .map(|v| v.split_whitespace().map(strip_iuse_default).collect())
-            .unwrap_or_default()
-    };
-
-    let (slot, sub_slot) = split_slot(vars.get("SLOT").map(String::as_str).unwrap_or("0"));
-    let mut deps = std::collections::BTreeMap::new();
-    for key in DEP_KEYS {
-        if let Some(value) = vars.get(*key) {
-            deps.insert((*key).to_string(), value.clone());
-        }
-    }
-
-    Ok(PackageMetadata {
-        slot: Some(slot),
-        sub_slot,
-        repo: Some(repo_name.to_string()),
-        eapi: Some(vars.get("EAPI").cloned().unwrap_or_else(|| "0".to_string())),
-        iuse: tokens("IUSE"),
-        use_enabled: Vec::new(),
-        keywords: tokens("KEYWORDS"),
-        deps,
-    })
+    Ok(metadata_from_vars(&vars, repo_name))
 }
 
 /// Strips a leading `+`/`-` default marker from an IUSE token (`+foo` -> `foo`).
