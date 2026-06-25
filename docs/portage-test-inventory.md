@@ -7,6 +7,30 @@ This inventory records every upstream Python test file currently present so dive
 ## Summary
 
 - Upstream test files inventoried: 239
+- **Coverage: 95.02% line / 97.14% region / 92.47% branch** (`cargo llvm-cov
+  --workspace`), 731 passing tests across ~40 suites, full gate green.
+
+### Remaining uncovered lines (honest classification)
+
+The last ~5% (439 lines) is **not** worth forcing to 100% — it is dominated by
+defensive arms whose contrived tests would add maintenance cost and false
+confidence (per advisor review). Categories:
+
+- **I/O-error arms** (`MergeError::Io`, `VardbError::Io`, repository/profile read
+  errors): only reachable via filesystem fault injection. A representative
+  subset IS covered by `tests/io_failure_cover.rs` (read-only dirs); the rest
+  are platform-fragile and skipped on root.
+- **Defensive `_ =>`/`unreachable`-style arms**: e.g. `match_by_operator`'s
+  catch-alls, `compare_records` error fallback, `single_inner_group`'s `Err`
+  branches — guarded by type/parse invariants upstream, so not reachable with
+  valid input.
+- **`resolver.rs` (the original fixture resolver)**: kept only for
+  `resolver_simple_parity`; its hard-coded DEPEND-string branch is fixture
+  scaffolding, superseded by the real `depgraph.rs`. Not worth new tests.
+- **DNF special-append micro-branches in `dep.rs`**: exercised in aggregate by
+  the use_reduce/subset suites, but individual `ur_special_append` arms depend
+  on rare nesting shapes.
+
 - Rust ports currently implemented: ~493 passing tests across 16 suites. The
   shared `tests/portage.rs` suite holds the core parity modules; additional
   standalone suites (`tests/*_extra.rs`, `tests/resolver_batch{1,2,3}.rs`) were
