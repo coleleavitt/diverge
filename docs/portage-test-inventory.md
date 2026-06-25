@@ -96,14 +96,21 @@ problem). A real merge derives its install image from the build's `D`
 ### Remaining gaps to a true drop-in replacement
 
 Every action executes and the plumbing (build → image → merge → VDB → world,
-sync, cache regen, cleanup, news) is wired and tested. What is *not* done is the
-last mile that genuinely requires the host toolchain and cannot be exercised
-hermetically here:
-- **Real package compilation**: the executor spawns the ebuild phase script
-  with a fixed argv + explicit env (no shell concatenation) and merges whatever
-  `src_install` writes to `D`, but it does not ship the upstream `ebuild.sh` /
-  EAPI shell helpers or a sandbox. A real build needs the system compiler,
-  `bash`, and the Portage phase-helper shell library.
+sync, cache regen, cleanup, news) is wired and tested. A **real ebuild's
+install phase now runs**: `executor::ebuild_sh::EbuildSpawner` sources a bundled
+faithful subset of Portage's install helpers (`into`/`insinto`/`exeinto`,
+`dodir`, `dobin`/`dosbin`, `doexe`, `doins -r`, `dolib*`, `dosym`, `dodoc`,
+`doman`, `keepdir`, `newbin`/`newins`, `fperms`) plus the ebuild itself and
+invokes the phase function, so a real `src_install` populates `$D`, which the
+merge installs into `ROOT` (`tests/portage/ebuild_build_parity.rs`, bash +
+coreutils only, fully hermetic).
+
+What is *not* done is the last mile that genuinely requires the host toolchain
+and cannot be exercised hermetically here:
+- **Real package compilation**: the install-phase helper contract is shipped and
+  runs, but `src_compile`/`src_configure` of real software still need the system
+  compiler, autotools/make, and the full upstream `ebuild.sh`/eclass shell
+  library + sandbox — i.e. an actual build environment.
 - **eclass sourcing at parse time**: metadata comes from the md5-cache when
   present (correct on a synced host) or a direct ebuild parse (no `inherit`
   execution) as a fallback. Generating cache for an uncached overlay still needs

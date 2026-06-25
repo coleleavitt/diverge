@@ -33,14 +33,9 @@ impl CommandSpawner {
     /// contains only a conservative `PATH` unless extended via
     /// [`Self::with_base_env`].
     pub fn new(ebuild_sh: impl Into<PathBuf>) -> Self {
-        let mut base_env = BTreeMap::new();
-        base_env.insert(
-            "PATH".to_string(),
-            "/usr/local/bin:/usr/bin:/bin".to_string(),
-        );
         Self {
             ebuild_sh: ebuild_sh.into(),
-            base_env,
+            base_env: super::phase::minimal_base_env(),
         }
     }
 

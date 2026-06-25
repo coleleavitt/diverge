@@ -27,6 +27,8 @@ mod dep_reduce_parity;
 mod depclean_parity;
 #[path = "portage/depgraph_parity.rs"]
 mod depgraph_parity;
+#[path = "portage/ebuild_build_parity.rs"]
+mod ebuild_build_parity;
 #[path = "portage/end_to_end.rs"]
 mod end_to_end;
 #[path = "portage/executor_parity.rs"]

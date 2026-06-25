@@ -247,3 +247,15 @@ pub fn phase_argv(ebuild_sh: &Path, phase: Phase) -> Vec<String> {
         phase.func_name().to_string(),
     ]
 }
+
+/// A minimal, explicit base environment for spawning ebuild phases: just a
+/// conservative `PATH`. Shared by the process spawners so the env-construction
+/// boundary is defined in one place.
+pub fn minimal_base_env() -> std::collections::BTreeMap<String, String> {
+    let mut env = std::collections::BTreeMap::new();
+    env.insert(
+        "PATH".to_string(),
+        "/usr/local/bin:/usr/bin:/bin".to_string(),
+    );
+    env
+}
