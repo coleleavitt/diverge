@@ -198,6 +198,9 @@ pub enum ResolveFailure {
     /// The request is only resolvable with autounmask keyword changes (see the
     /// outcome's `unstable_keywords`); the user must approve them.
     AutounmaskRequired,
+    /// A selected package's `REQUIRED_USE` constraint is not satisfied by the
+    /// active USE flags.
+    RequiredUseUnsatisfied { cpv: String, required_use: String },
 }
 
 impl std::fmt::Display for ResolveFailure {
@@ -216,6 +219,9 @@ impl std::fmt::Display for ResolveFailure {
                     f,
                     "autounmask keyword changes required (see unstable_keywords)"
                 )
+            }
+            Self::RequiredUseUnsatisfied { cpv, required_use } => {
+                write!(f, "{cpv}: REQUIRED_USE not satisfied: {required_use}")
             }
         }
     }
@@ -904,7 +910,52 @@ impl GraphBuilder<'_> {
     fn finish(mut self) -> Result<Vec<String>, ResolveFailure> {
         self.apply_slot_operator_rebuilds();
         self.check_blockers()?;
+        self.check_required_use()?;
         topological_order(&self.selected, &self.edges)
+    }
+
+    /// Each selected package's `REQUIRED_USE` must be satisfied by the active
+    /// USE flags (restricted to the package's IUSE domain). Mirrors emerge
+    /// rejecting a package whose REQUIRED_USE fails.
+    fn check_required_use(&self) -> Result<(), ResolveFailure> {
+        let use_flags: BTreeSet<&str> = self
+            .resolver
+            .params
+            .use_flags
+            .iter()
+            .map(String::as_str)
+            .collect();
+        for cpv in &self.selected {
+            let Some(meta) = self.resolver.available.metadata(cpv) else {
+                continue;
+            };
+            let Some(required_use) = meta.deps.get("REQUIRED_USE") else {
+                continue;
+            };
+            if required_use.trim().is_empty() {
+                continue;
+            }
+            let iuse: BTreeSet<&str> = meta.iuse.iter().map(String::as_str).collect();
+            let enabled: Vec<&str> = use_flags
+                .iter()
+                .copied()
+                .filter(|f| iuse.contains(f))
+                .collect();
+            let satisfied = crate::dep::check_required_use(
+                required_use,
+                &enabled,
+                |flag| iuse.contains(flag),
+                meta.eapi.as_deref(),
+            )
+            .unwrap_or(true);
+            if !satisfied {
+                return Err(ResolveFailure::RequiredUseUnsatisfied {
+                    cpv: cpv.clone(),
+                    required_use: required_use.clone(),
+                });
+            }
+        }
+        Ok(())
     }
 
     /// Pulls in slot-operator rebuilds: an installed package whose recorded

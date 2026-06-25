@@ -187,3 +187,48 @@ fn circular_build_dependency_is_detected() {
         outcome
     );
 }
+
+#[test]
+fn required_use_violation_is_rejected() {
+    // Ported from research/portage/lib/portage/tests/resolver/test_required_use.py:
+    // a package with REQUIRED_USE="^^ ( foo bar )" (exactly one of) must have
+    // exactly one of foo/bar enabled. With neither enabled the resolve fails.
+    let mut meta = pkg(&[]);
+    meta.iuse = vec!["foo".to_string(), "bar".to_string()];
+    meta.deps
+        .insert("REQUIRED_USE".to_string(), "^^ ( foo bar )".to_string());
+    let available = db(&[("app-misc/A-1", meta.clone())]);
+    let installed = PackageDb::new();
+
+    // No USE flags enabled -> ^^ ( foo bar ) is violated.
+    let resolver = Resolver::new(&available, &installed, ResolveParams::default());
+    let outcome = resolver.resolve(&["app-misc/A"]);
+    assert!(
+        matches!(
+            outcome.error,
+            Some(ResolveFailure::RequiredUseUnsatisfied { .. })
+        ),
+        "expected REQUIRED_USE failure, got {:?}",
+        outcome
+    );
+
+    // Enabling exactly one (foo) satisfies ^^ ( foo bar ).
+    let params = ResolveParams::default().with_use(["foo"]);
+    let resolver = Resolver::new(&available, &installed, params);
+    let outcome = resolver.resolve(&["app-misc/A"]);
+    assert!(outcome.is_success(), "{:?}", outcome.error);
+    assert_eq!(outcome.mergelist, vec!["app-misc/A-1"]);
+
+    // Enabling both violates the exactly-one constraint.
+    let params = ResolveParams::default().with_use(["foo", "bar"]);
+    let resolver = Resolver::new(&available, &installed, params);
+    let outcome = resolver.resolve(&["app-misc/A"]);
+    assert!(
+        matches!(
+            outcome.error,
+            Some(ResolveFailure::RequiredUseUnsatisfied { .. })
+        ),
+        "expected REQUIRED_USE failure with both enabled, got {:?}",
+        outcome
+    );
+}

@@ -7,13 +7,35 @@ This inventory records every upstream Python test file currently present so dive
 ## Summary
 
 - Upstream test files inventoried: 239
-- Representative Rust ports currently implemented: 28 parity modules (~50 ported
-  upstream test files) / 157 Rust parity tests, plus the interop differential
-  oracle, an end-to-end integration test, and a capstone full-pipeline test
-  (resolver advanced features → scheduler → gpkg) exercising all layers together.
-- Current Rust parity test entrypoint: `tests/portage.rs`
-- Coverage command: `cargo llvm-cov --workspace --all-targets --summary-only`
-  (currently ~86% line coverage)
+- Rust ports currently implemented: ~493 passing tests across 16 suites. The
+  shared `tests/portage.rs` suite holds the core parity modules; additional
+  standalone suites (`tests/*_extra.rs`, `tests/resolver_batch{1,2,3}.rs`) were
+  swarm-ported in parallel, one suite per upstream area
+  (util/dep/versions/sets/update/adapters/dbapi/matching/config/manifest/emerge
+  plus three resolver slices). Plus the interop differential oracle (diffed vs
+  real upstream Portage), an end-to-end integration test, a capstone
+  full-pipeline test, and a `session` suite proving the binary loads a real
+  on-disk config root and resolves end-to-end.
+- The binary is now wired end-to-end: `diverge -p <atom>` loads make.conf /
+  repos.conf / make.profile / vardb from `PORTAGE_CONFIGROOT`+`ROOT` and prints
+  an emerge-style pretend plan (see `src/session.rs`, `src/vardb.rs`).
+- Resolver now enforces `REQUIRED_USE` on selected packages
+  (`ResolveFailure::RequiredUseUnsatisfied`).
+- Current Rust parity test entrypoint: `tests/portage.rs` (+ standalone suites).
+- Coverage command: `cargo llvm-cov --workspace --all-targets --summary-only`.
+
+### Remaining gaps to a true drop-in replacement
+
+These are honest, still-open items (the binary resolves + pretends, but does not
+yet build/merge on a real system):
+- Real `ebuild.sh`/EAPI phase execution + sandbox (executor models the contract
+  and spawns processes, but does not run the upstream ebuild shell).
+- Mutating actions wired through the CLI (merge/unmerge/depclean execution);
+  currently only `--pretend` is dispatched.
+- `source` directive + eclass inheritance in config/ebuild parsing.
+- Full masks/licenses/USE_EXPAND in the resolver; binhost/GPG/real rsync sync.
+- Remaining resolver/* upstream cases (111 upstream files; a representative
+  subset is ported — many depend on features above).
 
 ### Layer coverage map (single crate, layered modules)
 
