@@ -78,27 +78,45 @@ just preview), all tested against isolated temp roots:
 | `--config` | ✅ runs the `pkg_config` phase on installed targets via the injectable `PhaseSpawner` |
 | real merge (non-pretend) | ✅ `Session::merge_action`: scheduler build phases → image merge → VDB record → world update, **gated** against `ROOT=/` |
 | `--unmerge` / `-C` | ✅ `Session::unmerge_action`: removes recorded `CONTENTS` + VDB entry, **gated** against `ROOT=/` |
-| `--prune`, `--clean`, `--rage-clean`, `--check-news` | ⏳ parse; report "not yet implemented" |
+| `--prune` | ✅ `Session::prune_action`: keeps the highest installed version per cp+slot, unmerges the rest, **gated** |
+| `--clean` / `--rage-clean` | ✅ `Session::clean_action`: unmerges installed packages unreferenced by world+system (depclean reachability), **gated** |
+| `--check-news` | ✅ `Session::check_news`: lists relevant unread GLEP 42 items (installed/keyword/profile + per-repo read set) |
 
-Safety gate: real merge/unmerge refuse to mutate `ROOT=/` unless
-`DIVERGE_ALLOW_ROOT` is set, so a real run can never touch the host system.
+**Every emerge action now executes** — there is no remaining "not yet
+ implemented" dispatch arm. Safety gate: every mutating action (merge, unmerge,
+prune, clean) refuses to touch `ROOT=/` unless `DIVERGE_ALLOW_ROOT` is set, so a
+real run can never modify the host system.
+
+The repository loader now **prefers the eclass-resolved `metadata/md5-cache`**
+entries over re-parsing raw ebuilds, so reading the real host tree yields the
+correct `KEYWORDS`/`SLOT`/deps (this fixed the host "no visible package"
+problem). A real merge derives its install image from the build's `D`
+(`<build>/image`) produced by `src_install`, with `image_for` as an override.
 
 ### Remaining gaps to a true drop-in replacement
 
-These are honest, still-open items (actions execute, but real package *building*
-on a live system is not done):
-- Real `ebuild.sh`/EAPI phase execution + sandbox (executor spawns processes via
-  a fixed argv + explicit env, but does not run the upstream ebuild shell — so a
-  merge's install image is supplied to `Session::merge_action` via the
-  `image_for` closure, not produced by a real compile yet).
-- `source` directive + eclass inheritance in config/ebuild parsing — so real
-  ebuilds' `KEYWORDS`/metadata (which come via eclass + md5-cache) aren't fully
-  resolved when reading the host tree directly.
-- Full masks/licenses/USE_EXPAND in the resolver; real network rsync/git sync
-  (modeled via `LocalSync`), binhost/GPG.
-- `--prune`/`--clean`/`--rage-clean`/`--check-news` execution.
-- Remaining resolver/* upstream cases (111 upstream files; a representative
-  subset is ported — many depend on features above).
+Every action executes and the plumbing (build → image → merge → VDB → world,
+sync, cache regen, cleanup, news) is wired and tested. What is *not* done is the
+last mile that genuinely requires the host toolchain and cannot be exercised
+hermetically here:
+- **Real package compilation**: the executor spawns the ebuild phase script
+  with a fixed argv + explicit env (no shell concatenation) and merges whatever
+  `src_install` writes to `D`, but it does not ship the upstream `ebuild.sh` /
+  EAPI shell helpers or a sandbox. A real build needs the system compiler,
+  `bash`, and the Portage phase-helper shell library.
+- **eclass sourcing at parse time**: metadata comes from the md5-cache when
+  present (correct on a synced host) or a direct ebuild parse (no `inherit`
+  execution) as a fallback. Generating cache for an uncached overlay still needs
+  eclass evaluation.
+- **Network sync backends** (rsync/git/webrsync) and binhost/GPG: modeled via the
+  injectable `SyncBackend`/`LocalSync`; no real network client is bundled.
+- Full masks/licenses/USE_EXPAND in the resolver; remaining resolver/* upstream
+  cases (111 files; a representative subset is ported).
+
+These remaining items require a live Gentoo system with its toolchain to
+implement and validate, which is beyond what this checkout can test in
+isolation; the architecture (injectable spawner/fetcher/sync, explicit roots) is
+in place for them to drop in.
 
 ### Layer coverage map (single crate, layered modules)
 
