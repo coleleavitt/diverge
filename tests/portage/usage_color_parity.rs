@@ -106,3 +106,60 @@ fn help_action_is_recognized() {
         EmergeAction::Help
     );
 }
+
+#[test]
+fn all_banner_advertised_options_are_accepted() {
+    // Every option named in the usage banner must parse (not UnknownOption).
+    for opt in [
+        "--color=y",
+        "--columns",
+        "--complete-graph",
+        "--deep",
+        "--jobs=4",
+        "--keep-going",
+        "--load-average=8",
+        "--newrepo",
+        "--newuse",
+        "--noconfmem",
+        "--nospinner",
+        "--oneshot",
+        "--onlydeps",
+        "--quiet-build=y",
+        "--reinstall=changed-use",
+        "--with-bdeps=y",
+    ] {
+        let r = EmergeRequest::parse([opt, "dev-libs/A"]);
+        assert!(r.is_ok(), "{opt} should parse: {r:?}");
+    }
+}
+
+#[test]
+fn missing_emerge_actions_and_short_flags_parse() {
+    use diverge::cli::EmergeAction;
+    assert_eq!(
+        EmergeRequest::parse(["--metadata"]).unwrap().action,
+        EmergeAction::Metadata
+    );
+    assert_eq!(
+        EmergeRequest::parse(["--check-news"]).unwrap().action,
+        EmergeAction::CheckNews
+    );
+    assert_eq!(
+        EmergeRequest::parse(["--rage-clean", "dev-libs/A"])
+            .unwrap()
+            .action,
+        EmergeAction::RageClean
+    );
+    // -F = --fetch-all-uri (an option, merge action stays).
+    let r = EmergeRequest::parse(["-F", "dev-libs/A"]).unwrap();
+    assert!(r.options.fetch_all_uri);
+    assert_eq!(r.action, EmergeAction::Merge);
+    // -S / --searchdesc imply the search action.
+    assert_eq!(
+        EmergeRequest::parse(["-S", "term"]).unwrap().action,
+        EmergeAction::Search
+    );
+    let r = EmergeRequest::parse(["--searchdesc", "term"]).unwrap();
+    assert_eq!(r.action, EmergeAction::Search);
+    assert!(r.options.searchdesc);
+}

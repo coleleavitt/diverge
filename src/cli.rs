@@ -18,14 +18,17 @@ use crate::atom::{Atom, DEPENDENCY_ATOM_OPTIONS};
 pub enum EmergeAction {
     Merge,
     Sync,
+    Metadata,
     Search,
     Info,
     Depclean,
     Unmerge,
     Prune,
     Clean,
+    RageClean,
     Config,
     ListSets,
+    CheckNews,
     Regen,
     Version,
     Help,
@@ -38,7 +41,12 @@ impl EmergeAction {
     fn takes_targets(self) -> bool {
         matches!(
             self,
-            Self::Merge | Self::Unmerge | Self::Prune | Self::Clean | Self::Config
+            Self::Merge
+                | Self::Unmerge
+                | Self::Prune
+                | Self::Clean
+                | Self::RageClean
+                | Self::Config
         )
     }
 
@@ -97,11 +105,23 @@ pub struct EmergeOptions {
     pub skipfirst: bool,
     pub debug: bool,
     pub selective: bool,
+    pub complete_graph: bool,
+    pub keep_going: bool,
+    pub newrepo: bool,
+    pub noconfmem: bool,
+    pub nospinner: bool,
+    pub fetch_all_uri: bool,
+    pub searchdesc: bool,
     // y/n-valued options.
     pub ask: YesNo,
     pub quiet: YesNo,
+    pub quiet_build: YesNo,
     pub autounmask: YesNo,
     pub getbinpkg: YesNo,
+    pub with_bdeps: YesNo,
+    pub with_test_deps: YesNo,
+    /// `--reinstall changed-use` (the only documented value).
+    pub reinstall: Option<String>,
     /// `--color < y | n >`: force colored output on/off (default: auto).
     pub color: YesNo,
     // integer-valued options.
@@ -156,6 +176,7 @@ fn short_to_long(flag: char) -> Option<&'static str> {
         'd' => "--debug",
         'e' => "--emptytree",
         'f' => "--fetchonly",
+        'F' => "--fetch-all-uri",
         'g' => "--usepkg",
         'G' => "--usepkgonly",
         'h' => "--help",
@@ -170,6 +191,7 @@ fn short_to_long(flag: char) -> Option<&'static str> {
         'q' => "--quiet",
         'r' => "--resume",
         's' => "--search",
+        'S' => "--searchdesc",
         't' => "--tree",
         'u' => "--update",
         'U' => "--changed-use",
@@ -258,10 +280,28 @@ impl Parser {
             "--resume" => opt.resume = true,
             "--skipfirst" | "--skip-first" => opt.skipfirst = true,
             "--debug" => opt.debug = true,
+            "--complete-graph" => opt.complete_graph = true,
+            "--keep-going" => opt.keep_going = true,
+            "--newrepo" => opt.newrepo = true,
+            "--noconfmem" => opt.noconfmem = true,
+            "--nospinner" => opt.nospinner = true,
+            "--fetch-all-uri" => opt.fetch_all_uri = true,
+            // --searchdesc implies the search action (emerge: searchdesc -> search).
+            "--searchdesc" => {
+                opt.searchdesc = true;
+                self.set_action(EmergeAction::Search)?;
+                return Ok(());
+            }
+            "--reinstall" => {
+                opt.reinstall = Some(value.unwrap_or("changed-use").to_string());
+            }
             "--ask" => opt.ask = yes_no(value)?,
             "--quiet" => opt.quiet = yes_no(value)?,
+            "--quiet-build" => opt.quiet_build = yes_no(value)?,
             "--autounmask" => opt.autounmask = yes_no(value)?,
             "--getbinpkg" => opt.getbinpkg = yes_no(value)?,
+            "--with-bdeps" => opt.with_bdeps = yes_no(value)?,
+            "--with-test-deps" => opt.with_test_deps = yes_no(value)?,
             "--color" => opt.color = yes_no(value)?,
             "--jobs" => opt.jobs = integer(value)?,
             "--load-average" => opt.load_average = integer(value)?,
@@ -441,14 +481,17 @@ fn next_value<I: Iterator<Item = String>>(
 fn action_for(name: &str) -> Option<EmergeAction> {
     Some(match name {
         "--sync" => EmergeAction::Sync,
+        "--metadata" => EmergeAction::Metadata,
         "--search" => EmergeAction::Search,
         "--info" => EmergeAction::Info,
         "--depclean" => EmergeAction::Depclean,
         "--unmerge" => EmergeAction::Unmerge,
         "--prune" => EmergeAction::Prune,
         "--clean" => EmergeAction::Clean,
+        "--rage-clean" => EmergeAction::RageClean,
         "--config" => EmergeAction::Config,
         "--list-sets" => EmergeAction::ListSets,
+        "--check-news" => EmergeAction::CheckNews,
         "--regen" => EmergeAction::Regen,
         "--version" => EmergeAction::Version,
         "--help" => EmergeAction::Help,
